@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LogIn } from 'lucide-react'
 import { useAuth } from '@/store/auth'
+import { api } from '@/lib/api'
 import { Logo } from '@/components/snooker/Logo'
 
 export default function LoginPage() {
@@ -25,12 +26,21 @@ export default function LoginPage() {
       let user
       try {
         user = await loginStaff(p, pin)
-      } catch {
+      } catch (staffErr: any) {
+        // A network/CORS failure (no HTTP response) must not be masked as
+        // "wrong PIN" — surface it. Only fall back to member on a real reply.
+        if (!staffErr?.response) throw staffErr
         user = await loginCustomer(p, pin)
       }
       router.replace(`/${user.role}`)
     } catch (e: any) {
-      setErr(e?.response?.data?.message || 'Wrong number or PIN. Please try again.')
+      if (!e?.response) {
+        setErr(`Can't reach the server (${api.defaults.baseURL}). The site's API URL may be unset or it needs a redeploy.`)
+      } else if (e.response.status === 401 || e.response.status === 400) {
+        setErr('Wrong number or PIN. Please try again.')
+      } else {
+        setErr(`Login failed — HTTP ${e.response.status}.`)
+      }
     } finally {
       setBusy(false)
     }
