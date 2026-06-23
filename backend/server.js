@@ -8,8 +8,20 @@ connectDB();
 
 const app = express();
 
+// CORS — tolerant of trailing slashes and any Vercel deploy/preview domain,
+// so a small env-var typo doesn't block the site. API is JWT-protected.
+const stripSlash = (s) => (s || '').trim().replace(/\/+$/, '');
+const allowedOrigins = stripSlash(process.env.FRONTEND_URL || 'http://localhost:3100')
+  .split(',')
+  .map(stripSlash)
+  .filter(Boolean);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3100',
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl / mobile apps / same-origin
+    const o = stripSlash(origin);
+    if (allowedOrigins.includes(o) || /\.vercel\.app$/i.test(o)) return cb(null, true);
+    return cb(null, false);
+  },
   credentials: true,
 }));
 app.use(express.json());
