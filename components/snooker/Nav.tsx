@@ -68,6 +68,12 @@ export function Nav() {
           >
             <Instagram size={15} />
           </a>
+          <Link
+            href="/login"
+            className="hidden rounded-md border border-white/15 px-3.5 py-2 font-display text-[0.78rem] font-bold uppercase tracking-wider text-white/70 transition-colors hover:border-gold hover:text-gold md:inline-block"
+          >
+            Login
+          </Link>
           <a
             href={LINKS.whatsapp}
             target="_blank"
@@ -101,15 +107,24 @@ export function Nav() {
               </a>
             ))}
           </div>
-          <a
-            href={LINKS.whatsapp}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-            className="mt-4 flex items-center justify-center gap-2 rounded-md bg-red py-2.5 font-display text-sm font-bold uppercase tracking-wider text-white"
-          >
-            <WhatsAppIcon size={15} /> Book a Table
-          </a>
+          <div className="mt-4 flex gap-3">
+            <Link
+              href="/login"
+              onClick={() => setOpen(false)}
+              className="flex-1 rounded-md border border-white/15 py-2.5 text-center font-display text-sm font-bold uppercase tracking-wider text-white/70"
+            >
+              Login
+            </Link>
+            <a
+              href={LINKS.whatsapp}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-md bg-red py-2.5 font-display text-sm font-bold uppercase tracking-wider text-white"
+            >
+              <WhatsAppIcon size={15} /> Book
+            </a>
+          </div>
         </div>
       )}
     </header>

@@ -63,8 +63,10 @@ export default function LoginPage() {
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           type="password"
-          placeholder={tab === 'staff' ? 'Password' : 'PIN'}
-          className="w-full rounded-lg border border-white/15 bg-ink-2 px-4 py-3 text-sm text-white outline-none focus:border-gold"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="PIN"
+          className="w-full rounded-lg border border-white/15 bg-ink-2 px-4 py-3 text-center text-sm tracking-[0.4em] text-white outline-none focus:border-gold"
         />
         {err && <p className="text-[0.78rem] text-red-light">{err}</p>}
         <button
