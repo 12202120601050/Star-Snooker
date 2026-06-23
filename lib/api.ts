@@ -1,10 +1,15 @@
 import axios from 'axios'
 
-// Base URL of the Star Snooker backend. Set NEXT_PUBLIC_API_URL in the
-// frontend env (e.g. https://api.starsnooker.app/api) once the backend is live.
-export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api',
-})
+// Resolve the backend base URL robustly: trim trailing slashes and ensure it
+// ends with /api — so it works whether NEXT_PUBLIC_API_URL is set as
+// "https://host" or "https://host/api" or "https://host/".
+function resolveBaseURL(): string {
+  let b = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').trim().replace(/\/+$/, '')
+  if (!/\/api$/i.test(b)) b += '/api'
+  return b
+}
+
+export const api = axios.create({ baseURL: resolveBaseURL() })
 
 // Attach the JWT (saved by the auth store) to every request.
 api.interceptors.request.use((config) => {
