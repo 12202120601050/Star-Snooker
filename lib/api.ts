@@ -1,10 +1,17 @@
 import axios from 'axios'
 
-// Resolve the backend base URL robustly: trim trailing slashes and ensure it
-// ends with /api — so it works whether NEXT_PUBLIC_API_URL is set as
-// "https://host" or "https://host/api" or "https://host/".
+// Known production backend (public Railway URL). Used as the default so the
+// app works even if NEXT_PUBLIC_API_URL is unset or set incorrectly on Vercel.
+const PROD_API = 'https://star-snooker-production.up.railway.app/api'
+
+// Resolve the base URL robustly:
+//  - empty / no protocol  → fall back to PROD_API
+//  - trailing slash       → trimmed
+//  - missing /api suffix  → appended
 function resolveBaseURL(): string {
-  let b = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').trim().replace(/\/+$/, '')
+  let b = (process.env.NEXT_PUBLIC_API_URL || '').trim()
+  if (!b || !/^https?:\/\//i.test(b)) return PROD_API
+  b = b.replace(/\/+$/, '')
   if (!/\/api$/i.test(b)) b += '/api'
   return b
 }
