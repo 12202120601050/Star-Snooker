@@ -1,0 +1,10 @@
+const express = require('express');
+const r = express.Router();
+const c = require('../controllers/booking.controller');
+const { protect, staffOrAdmin } = require('../middleware/auth');
+r.use(protect, staffOrAdmin);
+r.post('/', c.createBooking);
+r.get('/', c.getBookings);
+r.patch('/:id', c.updateBooking);
+r.delete('/:id', c.deleteBooking);
+module.exports = r;

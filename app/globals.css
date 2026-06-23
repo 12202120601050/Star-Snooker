@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #0a0a0b;
+  color: #f3f1ec;
+  font-family: var(--font-body), Inter, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html { scroll-behavior: smooth; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0a0b; }
+::-webkit-scrollbar-thumb { background: linear-gradient(#f2b01e, #e01f26); border-radius: 3px; }
+
+/* Visible keyboard focus for accessibility. */
+:focus-visible {
+  outline: 2px solid #f2b01e;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer utilities {
+  /* Gold gradient display text for headings. */
+  .gold-text {
+    background: linear-gradient(180deg, #ffe7a0 0%, #f2b01e 45%, #c98a12 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    filter: drop-shadow(0 2px 8px rgba(201, 138, 18, 0.35));
+  }
+
+  /* Gold ring border via a masked pseudo-element. */
+  .gold-border {
+    position: relative;
+  }
+  .gold-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(242, 176, 30, 0.9), rgba(242, 176, 30, 0.1), rgba(224, 31, 38, 0.6));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Subtle felt-green table texture for section backgrounds. */
+  .felt-bg {
+    background-color: #0f5a30;
+    background-image: radial-gradient(rgba(0, 0, 0, 0.25) 1px, transparent 1px);
+    background-size: 6px 6px;
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(8px);
+  }
+}
