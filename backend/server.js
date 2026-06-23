@@ -24,6 +24,7 @@ app.use('/api/sessions',    require('./routes/session.routes'));
 app.use('/api/stock',       require('./routes/stock.routes'));
 app.use('/api/stats',       require('./routes/stats.routes'));
 app.use('/api/leaderboard', require('./routes/leaderboard.routes'));
+app.use('/api/setup',       require('./routes/setup.routes'));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: '🎱 Star Snooker Academy API running!' });

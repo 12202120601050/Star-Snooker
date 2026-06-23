@@ -22,8 +22,10 @@ Do them in this order.
 2. Open the service → **Settings → Root Directory** → set to `backend`.
 3. **Variables** → add:
    ```
-   MONGODB_URI = (the Atlas string from step 1)
-   JWT_SECRET  = (a long random string — e.g. run: openssl rand -hex 32)
+   MONGODB_URI = (Atlas string — IMPORTANT: percent-encode special chars in the
+                  password. An "@" becomes "%40", e.g. pass "Patel@18" → "Patel%4018")
+   JWT_SECRET  = (a long random string)
+   SEED_KEY    = (any secret word you choose — used once to create accounts)
    FRONTEND_URL = http://localhost:3100   (update after step 3)
    NODE_ENV = production
    ```
@@ -32,15 +34,15 @@ Do them in this order.
    Your API base is that URL **+ `/api`**.
 5. Test it: open `https://<your-railway-domain>/api/health` → should say `Star Snooker Academy API running!`
 
-### Seed the first admin/staff accounts
-Easiest from your PC (points at Atlas, runs once):
-```bash
-cd C:\Users\trupa\star-snooker\backend
-npm install
-# create backend/.env with: MONGODB_URI=...   JWT_SECRET=...
-npm run seed
+### Seed the first admin/staff accounts (one URL)
+Once the backend is live, open this once in your browser (Railway can reach Atlas
+even if your home network can't):
 ```
-Creates **admin 9601818268 / staff 9106005507 (PIN 1234)**. Change the PINs after first login.
+https://<your-railway-domain>/api/setup/seed?key=<YOUR_SEED_KEY>
+```
+It creates **admin 9601818268 / staff 9106005507 (PIN 1234)** + canteen items, and
+returns `{ ok: true }`. Change the PINs after first login. (Safe to remove the
+SEED_KEY variable afterwards to disable the endpoint.)
 
 ---
 
