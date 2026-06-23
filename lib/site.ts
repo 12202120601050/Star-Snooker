@@ -42,8 +42,8 @@ export const NAV_ITEMS = [
 ] as const
 
 export const HERO_STATS = [
-  { value: 3, prefix: '', suffix: '', label: 'Snooker Tables' },
-  { value: 6, prefix: '', suffix: '', label: 'Game Types' },
+  { value: 9, prefix: '', suffix: '', label: 'Game Tables' },
+  { value: 5, prefix: '', suffix: '', label: 'Game Types' },
   { value: 50, prefix: '₹', suffix: '', label: 'From / Hour' },
 ] as const
 
@@ -57,24 +57,23 @@ export type Game = {
 }
 
 export const GAMES: Game[] = [
-  { name: 'Royal Snooker', sub: '3 championship tables · T1 · T2 · T3', icon: 'snooker', frame: 120, hour: '200–240' },
-  { name: 'Mini Snooker', sub: 'Quick frames, full fun', icon: 'snooker', frame: 80, hour: 150 },
-  { name: 'Pool', sub: '8-ball & 9-ball', icon: 'pool', frame: 80, hour: 150 },
-  { name: 'Carrom', sub: '2 or 4 players', icon: 'carrom', frame: '60–80', hour: null },
-  { name: 'Table Tennis', sub: '2 or 4 players', icon: 'tabletennis', frame: '60–150', hour: null },
+  { name: 'Big Snooker', sub: '2 championship tables', icon: 'snooker', frame: 120, hour: '200–240' },
+  { name: 'Mini Snooker', sub: '3 tables · quick frames', icon: 'snooker', frame: 80, hour: 150 },
+  { name: 'Pool', sub: '4 tables · 8-ball & 9-ball', icon: 'pool', frame: 80, hour: 150 },
+  { name: 'Carrom', sub: '2 or 4 players', icon: 'carrom', frame: '60–80', hour: '100–150' },
+  { name: 'Table Tennis', sub: '2 or 4 players', icon: 'tabletennis', frame: '60–80', hour: '100–150' },
   { name: 'Chess', sub: 'Per hour', icon: 'chess', frame: null, hour: 50 },
 ]
 
 // Price list shown on the site (frame = half hour).
 export const PRICE_ROWS: Array<{ name: string; frame: number | null; hour: number | null }> = [
-  { name: 'Royal Snooker (T1)', frame: 120, hour: 240 },
-  { name: 'Royal Snooker (T2)', frame: 120, hour: 200 },
-  { name: 'Royal Snooker (T3)', frame: 120, hour: 240 },
+  { name: 'Big Snooker · Table 1', frame: 120, hour: 240 },
+  { name: 'Big Snooker · Table 2', frame: 120, hour: 200 },
   { name: 'Mini Snooker', frame: 80, hour: 150 },
   { name: 'Pool', frame: 80, hour: 150 },
-  { name: 'Carrom · 2 Players', frame: 60, hour: null },
-  { name: 'Carrom · 4 Players', frame: 80, hour: null },
-  { name: 'Table Tennis · 2 Players', frame: 60, hour: null },
-  { name: 'Table Tennis · 4 Players', frame: 150, hour: null },
+  { name: 'Carrom · 2 Players', frame: 60, hour: 100 },
+  { name: 'Carrom · 4 Players', frame: 80, hour: 150 },
+  { name: 'Table Tennis · 2 Players', frame: 60, hour: 100 },
+  { name: 'Table Tennis · 4 Players', frame: 80, hour: 150 },
   { name: 'Chess', frame: null, hour: 50 },
 ]

@@ -11,14 +11,21 @@ export type TableConfig = {
 
 // Mirrors the club's price list. Carrom/TT frame charge is editable at start
 // (2 vs 4 players) since it varies; the value here is the 2-player default.
+// The venue's 9 tables (2 big snooker, 3 mini snooker, 4 pool) plus the other
+// games. Frame charge is editable when starting a frames/loser-pays session
+// (e.g. carrom/TT 2-vs-4 players).
 export const TABLES: TableConfig[] = [
-  { id: 't1', name: 'Royal Snooker T1', frame: 120, hour: 240 },
-  { id: 't2', name: 'Royal Snooker T2', frame: 120, hour: 200 },
-  { id: 't3', name: 'Royal Snooker T3', frame: 120, hour: 240 },
-  { id: 'mini', name: 'Mini Snooker', frame: 80, hour: 150 },
-  { id: 'pool', name: 'Pool', frame: 80, hour: 150 },
+  { id: 'big1', name: 'Big Snooker 1', frame: 120, hour: 240 },
+  { id: 'big2', name: 'Big Snooker 2', frame: 120, hour: 200 },
+  { id: 'mini1', name: 'Mini Snooker 1', frame: 80, hour: 150 },
+  { id: 'mini2', name: 'Mini Snooker 2', frame: 80, hour: 150 },
+  { id: 'mini3', name: 'Mini Snooker 3', frame: 80, hour: 150 },
+  { id: 'pool1', name: 'Pool 1', frame: 80, hour: 150 },
+  { id: 'pool2', name: 'Pool 2', frame: 80, hour: 150 },
+  { id: 'pool3', name: 'Pool 3', frame: 80, hour: 150 },
+  { id: 'pool4', name: 'Pool 4', frame: 80, hour: 150 },
   { id: 'carrom', name: 'Carrom', frame: 60, hour: 100 },
-  { id: 'tt', name: 'Table Tennis', frame: 60, hour: 150 },
+  { id: 'tt', name: 'Table Tennis', frame: 60, hour: 100 },
   { id: 'chess', name: 'Chess', frame: 50, hour: 50 },
 ]
 
