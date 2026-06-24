@@ -2,22 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { LogOut, Trophy, Clock, Phone } from 'lucide-react'
+import { LogOut, Clock, Phone, User as UserIcon, MapPin } from 'lucide-react'
 import { Guard } from '@/components/auth/Guard'
 import { useAuth } from '@/store/auth'
 import { api } from '@/lib/api'
 import { Logo } from '@/components/snooker/Logo'
-import { LINKS } from '@/lib/site'
+import { LINKS, SITE } from '@/lib/site'
 
 function CustomerHome() {
   const { user, logout } = useAuth()
   const router = useRouter()
-  const [points, setPoints] = useState<number | null>(null)
   const [active, setActive] = useState<any>(null)
 
   useEffect(() => {
-    // Loyalty + active table — best effort; fail silently if backend is offline.
-    api.get('/auth/me').then((r) => setPoints(r.data?.loyaltyPoints ?? null)).catch(() => {})
+    // Active table — best effort; fail silently if backend is offline.
     api.get('/sessions/my').then((r) => setActive(r.data)).catch(() => {})
   }, [])
 
@@ -39,16 +37,16 @@ function CustomerHome() {
         </div>
 
         <h1 className="mt-8 font-display text-2xl font-bold text-white">Hi {user?.name?.split(' ')[0] || 'there'} 👋</h1>
-        <p className="mt-1 text-[0.85rem] text-white/45">Welcome back to the club.</p>
+        <p className="mt-1 text-[0.85rem] text-white/45">Welcome to the club.</p>
 
-        {/* Loyalty */}
-        <div className="gold-border mt-6 rounded-2xl bg-gradient-to-br from-gold/10 to-transparent p-6">
+        {/* Member */}
+        <div className="gold-border mt-6 rounded-2xl bg-white/[0.02] p-6">
           <div className="flex items-center gap-2 text-gold">
-            <Trophy size={18} />
-            <span className="font-display text-[0.8rem] font-bold uppercase tracking-wider">Loyalty Points</span>
+            <UserIcon size={18} />
+            <span className="font-display text-[0.8rem] font-bold uppercase tracking-wider">Member</span>
           </div>
-          <div className="mt-2 font-display text-4xl font-bold text-white">{points ?? '—'}</div>
-          <p className="mt-1 text-[0.78rem] text-white/45">Earn points every hour you play.</p>
+          <div className="mt-2 font-display text-lg font-bold text-white">{user?.name}</div>
+          <div className="text-[0.8rem] text-white/45">{user?.phone}</div>
         </div>
 
         {/* Active table */}
@@ -67,14 +65,25 @@ function CustomerHome() {
           )}
         </div>
 
-        <a
-          href={LINKS.whatsapp}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-red px-6 py-3.5 font-display text-[0.82rem] font-bold uppercase tracking-wider text-white"
-        >
-          <Phone size={16} /> Book a Table
-        </a>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <a
+            href={LINKS.whatsapp}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-lg bg-red px-4 py-3.5 font-display text-[0.78rem] font-bold uppercase tracking-wider text-white"
+          >
+            <Phone size={15} /> Book
+          </a>
+          <a
+            href={LINKS.maps}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-lg border border-gold/40 px-4 py-3.5 font-display text-[0.78rem] font-bold uppercase tracking-wider text-gold"
+          >
+            <MapPin size={15} /> Visit
+          </a>
+        </div>
+        <p className="mt-4 text-center text-[0.72rem] text-white/30">{SITE.hours}</p>
       </div>
     </div>
   )
