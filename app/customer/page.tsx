@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { LogOut, Clock, Phone, User as UserIcon, MapPin, History, Star, AlertTriangle } from 'lucide-react'
+import { LogOut, Clock, Phone, User as UserIcon, MapPin, History, Star, AlertTriangle, BookUser, TrendingDown, TrendingUp, MessageSquare } from 'lucide-react'
 import { Guard } from '@/components/auth/Guard'
 import { useAuth } from '@/store/auth'
 import { api } from '@/lib/api'
@@ -21,7 +21,7 @@ function CustomerHome() {
   const [active, setActive] = useState<any>(null)
   const [visits, setVisits] = useState<Bill[]>([])
   const [profile, setProfile] = useState<any>(null)
-  const [tab, setTab] = useState<'home' | 'history'>('home')
+  const [tab, setTab] = useState<'home' | 'history' | 'khata'>('home')
 
   useEffect(() => {
     api.get('/sessions/my').then((r) => setActive(r.data)).catch(() => {})
@@ -61,7 +61,7 @@ function CustomerHome() {
           </button>
         </div>
         <div className="mx-auto flex max-w-md gap-1 px-3 pb-2">
-          {([['home', 'My Club'], ['history', 'Visit History']] as const).map(([id, label]) => (
+          {([['home', 'My Club'], ['history', 'Visits'], ['khata', 'Khata']] as const).map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`flex-1 rounded-lg py-2 font-display text-[0.72rem] font-bold uppercase tracking-wider transition-colors ${tab === id ? 'bg-gold text-ink' : 'text-white/50 hover:text-white'}`}>
               {label}
             </button>
@@ -226,6 +226,79 @@ function CustomerHome() {
                 ))}
               </div>
             )}
+          </>
+        )}
+
+        {/* ── KHATA TAB ── */}
+        {tab === 'khata' && (
+          <>
+            <div className="mb-5 flex items-center gap-2">
+              <BookUser size={18} className="text-gold" />
+              <h2 className="font-display text-lg font-bold text-white">My Khata</h2>
+            </div>
+
+            {/* Balance summary */}
+            {profile?.balance != null ? (
+              <div className={`mb-5 rounded-2xl p-5 text-center ${profile.balance > 0 ? 'border border-red-light/30 bg-red-light/[0.06]' : 'border border-green-400/20 bg-green-400/[0.04]'}`}>
+                <div className={`font-display text-3xl font-bold ${profile.balance > 0 ? 'text-red-light' : 'text-green-400'}`}>
+                  {rupee(Math.abs(profile.balance))}
+                </div>
+                <div className="mt-1 text-[0.72rem] text-white/45">
+                  {profile.balance > 0 ? 'outstanding balance — please clear at the counter' : profile.balance < 0 ? 'credit balance' : 'your account is clear ✓'}
+                </div>
+                {profile.balance > 0 && (
+                  <a
+                    href="https://wa.me/917433928183"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-red/20 px-4 py-2 font-display text-[0.72rem] font-bold uppercase text-red-light"
+                  >
+                    <MessageSquare size={13} /> Contact to Pay
+                  </a>
+                )}
+              </div>
+            ) : (
+              <div className="mb-5 rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-6 text-center text-[0.82rem] text-white/35">
+                Loading account info…
+              </div>
+            )}
+
+            {/* Transactions */}
+            {!profile?.transactions?.length ? (
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-10 text-center">
+                <BookUser size={28} className="mx-auto mb-3 text-white/20" />
+                <p className="text-[0.82rem] text-white/35">No transactions yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {(profile.transactions as any[]).map((t: any) => (
+                  <div key={t._id} className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      {t.type === 'gave'
+                        ? <TrendingDown size={16} className="shrink-0 text-red-light" />
+                        : <TrendingUp size={16} className="shrink-0 text-green-400" />
+                      }
+                      <div>
+                        <div className={`text-[0.78rem] font-semibold ${t.type === 'gave' ? 'text-red-light' : 'text-green-400'}`}>
+                          {t.type === 'gave' ? 'Credit given' : 'Payment received'}
+                        </div>
+                        {t.note && <div className="text-[0.65rem] text-white/35">{t.note}</div>}
+                        <div className="text-[0.62rem] text-white/25">
+                          {new Date(t.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`font-display text-sm font-bold ${t.type === 'gave' ? 'text-red-light' : 'text-green-400'}`}>
+                      {t.type === 'gave' ? '+' : '−'}{rupee(t.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="mt-5 text-center text-[0.68rem] text-white/25">
+              For any disputes, contact us on WhatsApp.
+            </p>
           </>
         )}
       </div>

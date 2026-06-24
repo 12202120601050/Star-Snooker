@@ -3,8 +3,8 @@ const ActiveSession = require('../models/ActiveSession');
 // Whitelist of writable fields (prevents NoSQL-operator injection / mass-assignment).
 const FIELDS = [
   'tableName', 'mode', 'status', 'startTime', 'pausedAt', 'totalPausedMs',
-  'hourRate', 'frameCharge', 'players', 'framesWonBy', 'customerName',
-  'customerId', 'cart', 'note',
+  'hourRate', 'frameCharge', 'players', 'framesWonBy', 'framesLostBy',
+  'selectedDuration', 'customerName', 'customerId', 'cart', 'note',
 ];
 
 function pick(body) {
@@ -64,14 +64,17 @@ exports.updateSession = async (req, res) => {
 };
 
 // PATCH /api/sessions/:tableId/frame — record a frame result (loser pays).
-// body: { winner: 0 | 1 } (index into players)
+// body: { winner: number, loser: number } (indices into players array)
 exports.addFrame = async (req, res) => {
   try {
     const winner = Number(req.body.winner);
-    if (![0, 1].includes(winner)) return res.status(400).json({ message: 'winner must be 0 or 1' });
+    const loser  = req.body.loser !== undefined ? Number(req.body.loser) : (winner === 0 ? 1 : 0);
+    if (winner < 0 || loser < 0 || winner === loser) {
+      return res.status(400).json({ message: 'Invalid winner/loser indices' });
+    }
     const session = await ActiveSession.findOneAndUpdate(
       { tableId: req.params.tableId },
-      { $push: { framesWonBy: winner } },
+      { $push: { framesWonBy: winner, framesLostBy: loser } },
       { new: true },
     );
     if (!session) return res.status(404).json({ message: 'Session not found' });

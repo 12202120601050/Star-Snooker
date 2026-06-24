@@ -15,6 +15,8 @@ const activeSessionSchema = new mongoose.Schema({
   frameCharge:  { type: Number, default: 0 },
   players:      { type: [String], default: [] },  // names, for frames/loser-pays
   framesWonBy:  { type: [Number], default: [] },  // winner index per frame
+  framesLostBy: { type: [Number], default: [] },  // loser index per frame (multi-player)
+  selectedDuration: { type: Number, default: null }, // fixed booking in minutes
   customerName: { type: String, default: 'Walk-in' },
   customerId:   { type: String, default: null },
   cart:         { type: Array, default: [] },     // [{ itemId, name, price, qty }]

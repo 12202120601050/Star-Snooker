@@ -1,11 +1,14 @@
 const express = require('express');
 const r = express.Router();
 const c = require('../controllers/customer.controller');
-const { protect, staffOrAdmin, adminOnly } = require('../middleware/auth');
+const { protect, staffOrAdmin, adminOnly, anyAuth } = require('../middleware/auth');
 
 // Public — customer self-service
 r.post('/register', c.registerCustomer);
 r.post('/login', c.loginCustomer);
+
+// Customer self-profile (own data only)
+r.get('/me', protect, anyAuth, c.getMe);
 
 // Staff + Admin
 r.use(protect, staffOrAdmin);

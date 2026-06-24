@@ -4,6 +4,25 @@ const Bill = require('../models/Bill');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// GET /api/customers/me — customer sees their own profile, khata, bills
+exports.getMe = async (req, res) => {
+  try {
+    const id = req.user._id || req.user.id;
+    const customer = await Customer.findById(id).select('-pin');
+    if (!customer) return res.status(404).json({ message: 'Not found' });
+    const transactions = await KhataTransaction.find({ customerId: customer._id })
+      .sort({ createdAt: -1 }).limit(30);
+    const bills = await Bill.find({ customerName: customer.name })
+      .sort({ createdAt: -1 }).limit(30);
+    const balance = transactions.reduce(
+      (s, t) => (t.type === 'gave' ? s + t.amount : s - t.amount), 0
+    );
+    res.json({ ...customer.toObject(), pin: undefined, transactions, bills, balance });
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch profile' });
+  }
+};
+
 // GET /api/customers
 exports.getCustomers = async (req, res) => {
   try {
