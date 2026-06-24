@@ -1,15 +1,12 @@
 'use client'
 
 import { Guard } from '@/components/auth/Guard'
-import { ManageProvider } from '@/components/manage/Provider'
-import { Console } from '@/components/manage/Console'
+import { StaffDashboard } from '@/components/manage/StaffDashboard'
 
 export default function StaffPage() {
   return (
     <Guard roles={['staff', 'admin']}>
-      <ManageProvider>
-        <Console />
-      </ManageProvider>
+      <StaffDashboard />
     </Guard>
   )
 }
