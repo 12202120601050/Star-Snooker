@@ -75,11 +75,13 @@ const DURATIONS = [
 
 // ── Start modal ──
 function StartModal({ table, customers, onStart, onClose }: {
-  table: TableConfig; customers: string[]
+  table: TableConfig
+  customers: Array<{ _id: string; name: string; balance?: number }>
   onStart: (o: any) => void; onClose: () => void
 }) {
   const [mode, setMode] = useState<'timer' | 'frames'>('timer')
   const [cust, setCust] = useState('Walk-in')
+  const [custId, setCustId] = useState<string | null>(null)
   const [players, setPlayers] = useState(['Player 1', 'Player 2'])
   const [hourRate, setHourRate] = useState(table.hour ?? 0)
   const [frameCharge, setFrameCharge] = useState(table.frame ?? 0)
@@ -156,10 +158,36 @@ function StartModal({ table, customers, onStart, onClose }: {
 
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Customer</label>
         <div className="mb-2 flex flex-wrap gap-1.5">
-          <button onClick={() => setCust('Walk-in')} className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === 'Walk-in' ? 'text-white' : 'border border-white/12 text-white/55'}`} style={cust === 'Walk-in' ? { background: '#1f8a4c' } : undefined}>Walk-in</button>
-          {customers.map((c) => <button key={c} onClick={() => setCust(c)} className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === c ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>{c}</button>)}
+          <button
+            onClick={() => { setCust('Walk-in'); setCustId(null) }}
+            className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === 'Walk-in' ? 'text-white' : 'border border-white/12 text-white/55'}`}
+            style={cust === 'Walk-in' ? { background: '#1f8a4c' } : undefined}
+          >Walk-in</button>
+          {customers.map((c) => (
+            <button
+              key={c._id}
+              onClick={() => { setCust(c.name); setCustId(c._id) }}
+              className={`relative rounded-md px-2.5 py-1 text-[0.72rem] ${cust === c.name && custId === c._id ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}
+            >
+              {c.name}
+              {(c.balance || 0) > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-light text-[0.45rem] font-bold text-white">!</span>
+              )}
+            </button>
+          ))}
         </div>
-        <input value={cust === 'Walk-in' ? '' : cust} onChange={(e) => setCust(e.target.value || 'Walk-in')} placeholder="Or type name…" className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+        {custId && (customers.find(c => c._id === custId)?.balance || 0) > 0 && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-red-light/25 bg-red-light/[0.06] px-3 py-1.5">
+            <AlertTriangle size={12} className="shrink-0 text-red-light" />
+            <span className="text-[0.68rem] text-red-light">Outstanding balance: {rupee(customers.find(c => c._id === custId)!.balance!)}</span>
+          </div>
+        )}
+        <input
+          value={cust === 'Walk-in' ? '' : cust}
+          onChange={(e) => { setCust(e.target.value || 'Walk-in'); setCustId(null) }}
+          placeholder="Or type name…"
+          className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold"
+        />
 
         <button onClick={() => setForgot(!forgot)} className="mb-2 flex items-center gap-2 text-[0.78rem] font-semibold text-white/45">
           <span className={`flex h-4 w-4 items-center justify-center rounded border ${forgot ? 'border-gold bg-gold text-ink' : 'border-white/25'}`}>{forgot && '✓'}</span>
@@ -174,7 +202,7 @@ function StartModal({ table, customers, onStart, onClose }: {
 
         <button
           onClick={() => onStart({
-            mode, customerName: cust, hourRate, frameCharge,
+            mode, customerName: cust, customerId: custId, hourRate, frameCharge,
             players: mode === 'frames' ? players : [],
             startTime: Date.now() - Number(agoMin || 0) * 60000,
             selectedDuration: durationMin > 0 ? durationMin : undefined,
@@ -666,7 +694,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 
   useEffect(() => {
     refreshTables(); refreshBills(); refreshCanteen()
-    if (admin) { api.get('/khata').then((r) => setKhata(r.data || [])).catch(() => {}) }
+    api.get('/khata').then((r) => setKhata(r.data || [])).catch(() => {})
     const t = setInterval(() => {
       setNow(Date.now())
       if (!polling.current) { polling.current = true; refreshTables().finally(() => { polling.current = false }) }
@@ -674,11 +702,15 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     return () => clearInterval(t)
   }, [admin])
 
-  const customers = useMemo(() => Array.from(new Set(bills.map((b) => b.customerName).filter((c): c is string => !!c && c !== 'Walk-in' && c !== 'Counter'))), [bills])
+  // Registered customers from khata (includes balance for warning display)
+  const customers = useMemo(
+    () => khata.filter((k) => k.name).map((k) => ({ _id: k._id, name: k.name, balance: k.balance || 0 })),
+    [khata]
+  )
 
   const start = async (t: TableConfig, o: any) => {
     setStartFor(null)
-    await api.post('/sessions', { tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime, hourRate: o.hourRate, frameCharge: o.frameCharge, players: o.players, customerName: o.customerName, cart: [], selectedDuration: o.selectedDuration }).catch(() => {})
+    await api.post('/sessions', { tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime, hourRate: o.hourRate, frameCharge: o.frameCharge, players: o.players, customerName: o.customerName, customerId: o.customerId || null, cart: [], selectedDuration: o.selectedDuration }).catch(() => {})
     refreshTables()
   }
 
@@ -733,6 +765,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       discount: disc, total, paymentMethod: method,
       cashAmount: resolvedCash, upiAmount: resolvedUpi,
       customerName: s.customerName,
+      customerId: s.customerId || null,
     }).catch(() => {})
     refreshBills(); refreshCanteen()
   }
@@ -938,7 +971,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {billFor && sessions[billFor.id] && <BillModal table={billFor} session={sessions[billFor.id]} now={now} onProcess={(m, d, c, u) => processBill(billFor, m, d, c, u)} onClose={() => setBillFor(null)} />}
       {frameFor && sessions[frameFor] && <FrameModal session={sessions[frameFor]} onRecord={(w, l) => recordFrame(frameFor, w, l)} onClose={() => setFrameFor(null)} />}
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
-      {addBill && <AddBillModal canteen={canteen} customers={customers} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
+      {addBill && <AddBillModal canteen={canteen} customers={customers.map(c => c.name)} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
       {showReport && <ShiftReportModal bills={bills} onClose={() => setShowReport(false)} />}
     </div>
   )
