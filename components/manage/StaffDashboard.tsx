@@ -45,10 +45,23 @@ const frameTotals = (s: ApiSession) => {
   for (const w of s.framesWonBy || []) owed[w === 0 ? 1 : 0] += s.frameCharge
   return { owed, total: owed[0] + owed[1] }
 }
-const sessAmount = (t: TableConfig, s: ApiSession, now: number) =>
-  s.mode === 'frames' ? frameTotals(s).total : timerAmount(s.hourRate || t.hour || 0, now - s.startTime)
+const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
+  if (s.mode === 'frames') return frameTotals(s).total
+  const rate = s.hourRate || t.hour || 0
+  // Fixed duration booking: bill is locked to selected duration, not elapsed time
+  if (s.selectedDuration) return Math.round(rate * (s.selectedDuration / 60))
+  return timerAmount(rate, now - s.startTime)
+}
 
 // ── Start modal ──
+const DURATIONS = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hr', minutes: 60 },
+  { label: '1.5 hr', minutes: 90 },
+  { label: '2 hr', minutes: 120 },
+  { label: 'Open', minutes: 0 },
+]
+
 function StartModal({ table, customers, onStart, onClose }: {
   table: TableConfig
   customers: string[]
@@ -61,8 +74,11 @@ function StartModal({ table, customers, onStart, onClose }: {
   const [p2, setP2] = useState('Player 2')
   const [hourRate, setHourRate] = useState(table.hour ?? 0)
   const [frameCharge, setFrameCharge] = useState(table.frame ?? 0)
+  const [durationMin, setDurationMin] = useState(0) // 0 = open/no limit
   const [forgot, setForgot] = useState(false)
   const [agoMin, setAgoMin] = useState('0')
+
+  const fixedAmount = durationMin > 0 ? Math.round(hourRate * (durationMin / 60)) : null
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -85,6 +101,24 @@ function StartModal({ table, customers, onStart, onClose }: {
           <div className="mb-3">
             <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate ₹/hour</label>
             <input type="number" value={hourRate} onChange={(e) => setHourRate(Number(e.target.value))} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+            <label className="mb-1 mt-3 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Duration</label>
+            <div className="flex gap-1.5">
+              {DURATIONS.map((d) => (
+                <button
+                  key={d.minutes}
+                  onClick={() => setDurationMin(d.minutes)}
+                  className={`flex-1 rounded-lg py-1.5 font-display text-[0.65rem] font-bold uppercase transition-colors ${durationMin === d.minutes ? 'bg-gold text-ink' : 'border border-white/12 text-white/55 hover:border-gold/40'}`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            {fixedAmount !== null && (
+              <div className="mt-2 flex items-center justify-between rounded-lg bg-gold/[0.08] px-3 py-2">
+                <span className="text-[0.72rem] text-white/50">Fixed charge</span>
+                <span className="font-display font-bold text-gold">₹{fixedAmount}</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mb-3 grid grid-cols-2 gap-2">
@@ -113,7 +147,7 @@ function StartModal({ table, customers, onStart, onClose }: {
         )}
 
         <button
-          onClick={() => onStart({ mode, customerName: cust, hourRate, frameCharge, players: mode === 'frames' ? [p1, p2] : [], startTime: Date.now() - Number(agoMin || 0) * 60000 })}
+          onClick={() => onStart({ mode, customerName: cust, hourRate, frameCharge, players: mode === 'frames' ? [p1, p2] : [], startTime: Date.now() - Number(agoMin || 0) * 60000, selectedDuration: durationMin > 0 ? durationMin : undefined })}
           className="w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white"
         >
           🎱 Start Session
@@ -449,7 +483,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 
   const start = async (t: TableConfig, o: any) => {
     setStartFor(null)
-    await api.post('/sessions', { tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime, hourRate: o.hourRate, frameCharge: o.frameCharge, players: o.players, customerName: o.customerName, cart: [] }).catch(() => {})
+    await api.post('/sessions', { tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime, hourRate: o.hourRate, frameCharge: o.frameCharge, players: o.players, customerName: o.customerName, cart: [], selectedDuration: o.selectedDuration }).catch(() => {})
     refreshTables()
   }
 
@@ -589,7 +623,14 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                       <span className="font-display text-[0.95rem] font-bold text-white">{t.name}</span>
                       <span className="rounded bg-red/15 px-2 py-0.5 text-[0.6rem] font-bold uppercase text-red-light">{s.mode}</span>
                     </div>
-                    <div className="mt-1 text-[0.72rem] text-white/45">{s.customerName || 'Walk-in'}</div>
+                    <div className="mt-1 flex items-center gap-2 text-[0.72rem] text-white/45">
+                      <span>{s.customerName || 'Walk-in'}</span>
+                      {s.selectedDuration && (
+                        <span className="rounded bg-gold/20 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold">
+                          {s.selectedDuration >= 60 ? `${s.selectedDuration / 60}hr` : `${s.selectedDuration}min`}
+                        </span>
+                      )}
+                    </div>
                     {s.mode === 'timer' ? (
                       <div className="mt-2 flex items-end justify-between">
                         <span className="font-display text-xl font-bold tabular-nums text-white">{fmtDuration(now - s.startTime)}</span>
