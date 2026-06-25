@@ -350,7 +350,7 @@ function FrameModal({ session, onRecord, onClose }: {
 // ── Bill modal ──
 function BillModal({ table, session, now, onProcess, onClose }: {
   table: TableConfig; session: ApiSession; now: number
-  onProcess: (method: string, disc: number, cashAmt?: number, upiAmt?: number) => void
+  onProcess: (method: string, disc: number, cashAmt?: number, upiAmt?: number, resolvedCustomerId?: string, resolvedCustomerName?: string) => void
   onClose: () => void
 }) {
   const play = sessAmount(table, session, now)
@@ -359,9 +359,20 @@ function BillModal({ table, session, now, onProcess, onClose }: {
   const [pm, setPm] = useState<'cash' | 'upi' | 'split' | 'credit'>('cash')
   const [cashAmt, setCashAmt] = useState('')
   const [upiAmt, setUpiAmt] = useState('')
+
+  // Registration flow for credit with unregistered customer
+  const needsReg = pm === 'credit' && !session.customerId
+  const isWalkIn = session.customerName === 'Walk-in' || !session.customerName
+  const [regName, setRegName] = useState(isWalkIn ? '' : (session.customerName || ''))
+  const [regPhone, setRegPhone] = useState('')
+  const [regState, setRegState] = useState<'idle' | 'busy' | 'done' | 'exists'>('idle')
+  const [regError, setRegError] = useState('')
+  const [regPin, setRegPin] = useState('')
+  const [resolvedId, setResolvedId] = useState<string | null>(null)
+  const [resolvedName, setResolvedName] = useState<string | null>(null)
+
   const d = Math.min(Number(disc) || 0, play + canteen)
   const total = play + canteen - d
-  const isUnregistered = !session.customerId && session.customerName !== 'Walk-in'
   const frameMode = session.mode === 'frames'
   const ft = frameMode ? frameTotals(session) : null
 
@@ -369,9 +380,44 @@ function BillModal({ table, session, now, onProcess, onClose }: {
   const handleUpiChange = (v: string) => { setUpiAmt(v); setCashAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const splitValid = pm !== 'split' || (Number(cashAmt) + Number(upiAmt) === total && total > 0)
 
+  // Credit is allowed to proceed only if customer is registered or registration done
+  const creditReady = !needsReg || regState === 'done'
+  const canCollect = splitValid && creditReady
+
+  const registerCustomer = async () => {
+    if (!regName.trim() || !regPhone.trim()) { setRegError('Name and phone are required'); return }
+    if (regPhone.replace(/\D/g,'').length < 10) { setRegError('Enter a valid 10-digit phone number'); return }
+    setRegState('busy'); setRegError('')
+    try {
+      const { data } = await api.post('/customers', { name: regName.trim(), phone: regPhone.trim() })
+      setResolvedId(data._id)
+      setResolvedName(data.name)
+      setRegPin(data.defaultPin || regPhone.replace(/\D/g,'').slice(-4))
+      setRegState('done')
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || ''
+      if (msg.toLowerCase().includes('already')) {
+        setRegState('exists'); setRegError(msg)
+      } else {
+        setRegState('idle'); setRegError(msg || 'Registration failed')
+      }
+    }
+  }
+
+  const handleCollect = () => {
+    if (!canCollect) return
+    onProcess(
+      pm, d,
+      pm === 'split' ? Number(cashAmt) : undefined,
+      pm === 'split' ? Number(upiAmt) : undefined,
+      resolvedId || undefined,
+      resolvedName || undefined,
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-sm rounded-2xl border border-gold/25 bg-ink-2 p-5">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-gold/25 bg-ink-2 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-display text-base font-bold uppercase text-white">Bill · {table.name}</h3>
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={18} /></button>
@@ -391,14 +437,17 @@ function BillModal({ table, session, now, onProcess, onClose }: {
           {d > 0 && <div className="flex justify-between text-green-400"><span>Discount</span><span>-{rupee(d)}</span></div>}
           <div className="flex justify-between border-t border-white/10 pt-1.5 font-display font-bold"><span>Total</span><span className="text-gold">{rupee(total)}</span></div>
         </div>
+
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Discount ₹</label>
         <input type="number" value={disc} onChange={(e) => setDisc(e.target.value)} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Payment Method</label>
         <div className="mb-3 flex gap-1.5">
           {(['cash', 'upi', 'split', 'credit'] as const).map((m) => (
-            <button key={m} onClick={() => { setPm(m); setCashAmt(''); setUpiAmt('') }} className={`flex-1 rounded-lg py-2 text-[0.7rem] font-bold uppercase ${pm === m ? 'bg-gold text-ink' : 'border border-white/12 text-white/50'}`}>{m}</button>
+            <button key={m} onClick={() => { setPm(m); setCashAmt(''); setUpiAmt(''); setRegState('idle'); setRegError('') }} className={`flex-1 rounded-lg py-2 text-[0.7rem] font-bold uppercase ${pm === m ? 'bg-gold text-ink' : 'border border-white/12 text-white/50'}`}>{m}</button>
           ))}
         </div>
+
         {pm === 'split' && (
           <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
             <p className="mb-2 text-[0.68rem] uppercase tracking-wider text-white/40">Split — must total {rupee(total)}</p>
@@ -409,19 +458,89 @@ function BillModal({ table, session, now, onProcess, onClose }: {
             {!splitValid && (Number(cashAmt) > 0 || Number(upiAmt) > 0) && <p className="mt-1.5 text-[0.68rem] text-red-light">Cash + UPI must equal {rupee(total)}</p>}
           </div>
         )}
+
+        {/* ── Credit flow ── */}
         {pm === 'credit' && (
-          <div className={`mb-3 rounded-xl border px-3 py-2 ${isUnregistered ? 'border-orange-400/30 bg-orange-400/[0.05]' : 'border-red-light/20 bg-red-light/[0.05]'}`}>
-            {isUnregistered ? (
-              <p className="text-[0.72rem] text-orange-400">⚠ "{session.customerName}" is not a registered customer — khata will NOT be updated. Register them first to track credit.</p>
-            ) : frameMode && (session.playerIds || []).some(id => !id) ? (
-              <p className="text-[0.72rem] text-orange-400">⚠ Some players are not linked to registered customers — their khata may not be updated. Link players in the session to fix this.</p>
-            ) : (
-              <p className="text-[0.72rem] text-red-light">⚠ Amount will be added to {frameMode ? "players'" : `${session.customerName}'s`} khata as outstanding balance.</p>
-            )}
-          </div>
+          session.customerId ? (
+            /* Registered customer — just confirm */
+            <div className="mb-3 rounded-xl border border-red-light/20 bg-red-light/[0.05] px-3 py-2.5">
+              {frameMode && (session.playerIds || []).some(id => !id) ? (
+                <p className="text-[0.72rem] text-orange-400">⚠ Some players are not linked — their khata won't be updated.</p>
+              ) : (
+                <p className="text-[0.72rem] text-red-light">⚠ {rupee(total)} will be added to <span className="font-bold text-white">{session.customerName}</span>'s khata as outstanding balance.</p>
+              )}
+            </div>
+          ) : regState === 'done' ? (
+            /* ✓ Registration succeeded */
+            <div className="mb-3 rounded-xl border border-green-400/30 bg-green-400/[0.05] px-4 py-3">
+              <div className="mb-1 flex items-center gap-2">
+                <CheckCircle size={15} className="text-green-400" />
+                <span className="text-[0.78rem] font-bold text-green-400">Customer registered!</span>
+              </div>
+              <div className="text-[0.72rem] text-white/70"><span className="font-semibold text-white">{resolvedName}</span> · {regPhone}</div>
+              <div className="mt-2 flex items-center gap-2 rounded-lg bg-ink/60 px-3 py-1.5">
+                <span className="text-[0.65rem] uppercase tracking-wider text-white/40">Default PIN</span>
+                <span className="font-display text-sm font-bold tracking-widest text-gold">{regPin}</span>
+                <span className="text-[0.6rem] text-white/30">— share with customer</span>
+              </div>
+              <div className="mt-1.5 text-[0.65rem] text-white/35">Bill will auto-add to their khatabook.</div>
+            </div>
+          ) : (
+            /* Registration form */
+            <div className="mb-3 rounded-xl border border-gold/20 bg-gold/[0.03] p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <BookUser size={14} className="text-gold" />
+                <span className="font-display text-[0.72rem] font-bold uppercase tracking-wider text-gold">
+                  {isWalkIn ? 'Register customer to give credit' : `Register "${session.customerName}" to track credit`}
+                </span>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className="mb-0.5 block text-[0.62rem] uppercase tracking-wider text-white/40">Full Name</label>
+                  <input
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder="Customer name"
+                    className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[0.62rem] uppercase tracking-wider text-white/40">Phone Number</label>
+                  <input
+                    value={regPhone}
+                    onChange={(e) => { setRegPhone(e.target.value); setRegError(''); setRegState('idle') }}
+                    placeholder="10-digit mobile number"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold"
+                  />
+                </div>
+                {regError && (
+                  <p className="text-[0.68rem] text-red-light">{regError}</p>
+                )}
+                {regState === 'exists' && (
+                  <p className="text-[0.65rem] text-orange-400">This phone is already registered. Search them in the Khata tab and link them to this session.</p>
+                )}
+                <button
+                  onClick={registerCustomer}
+                  disabled={regState === 'busy'}
+                  className="w-full rounded-lg bg-gold py-2 font-display text-[0.72rem] font-bold uppercase tracking-wider text-ink disabled:opacity-50"
+                >
+                  {regState === 'busy' ? 'Registering…' : '✓ Register & Continue'}
+                </button>
+              </div>
+              <p className="mt-2 text-[0.6rem] text-white/25">Default PIN = last 4 digits of phone. Customer can change from their app.</p>
+            </div>
+          )
         )}
-        <button onClick={() => splitValid && onProcess(pm, d, pm === 'split' ? Number(cashAmt) : undefined, pm === 'split' ? Number(upiAmt) : undefined)} disabled={!splitValid} className={`w-full rounded-lg py-3 font-display text-sm font-bold uppercase tracking-wider text-white ${splitValid ? 'bg-red' : 'cursor-not-allowed bg-red/40'}`}>
-          ✅ Collect {rupee(total)}
+
+        <button
+          onClick={handleCollect}
+          disabled={!canCollect}
+          className={`w-full rounded-lg py-3 font-display text-sm font-bold uppercase tracking-wider text-white transition-colors ${canCollect ? 'bg-red' : 'cursor-not-allowed bg-white/10 text-white/30'}`}
+        >
+          {needsReg && regState !== 'done' ? '🔒 Register customer first' : `✅ Collect ${rupee(total)}`}
         </button>
       </div>
     </div>
@@ -949,13 +1068,23 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     await api.delete(`/sessions/${tableId}`).catch(() => {})
   }
 
-  const processBill = async (t: TableConfig, method: string, disc: number, cashAmt?: number, upiAmt?: number) => {
+  const refreshKhata = async () => {
+    try { const { data } = await api.get('/khata'); setKhata(data || []) } catch {}
+  }
+
+  const processBill = async (
+    t: TableConfig, method: string, disc: number,
+    cashAmt?: number, upiAmt?: number,
+    resolvedCustomerId?: string, resolvedCustomerName?: string,
+  ) => {
     const s = sessions[t.id]
     const play = sessAmount(t, s, Date.now())
     const canteenAmt = (s.cart || []).reduce((a, c) => a + c.price * c.qty, 0)
     const total = play + canteenAmt - disc
     const resolvedCash = method === 'cash' ? total : method === 'split' ? (cashAmt ?? 0) : 0
     const resolvedUpi = method === 'upi' ? total : method === 'split' ? (upiAmt ?? 0) : 0
+    const finalCustomerId = resolvedCustomerId || s.customerId || null
+    const finalCustomerName = resolvedCustomerName || s.customerName || 'Walk-in'
     setBillFor(null)
     await cancel(t.id)
     await api.post('/bills', {
@@ -965,8 +1094,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       amount: play, canteenAmount: canteenAmt, canteenItems: s.cart || [],
       discount: disc, total, paymentMethod: method,
       cashAmount: resolvedCash, upiAmount: resolvedUpi,
-      customerName: s.customerName,
-      customerId: s.customerId || null,
+      customerName: finalCustomerName,
+      customerId: finalCustomerId,
     }).catch(() => {})
 
     // Frame mode: create per-player khata entries for credit
@@ -983,6 +1112,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       }
     }
     refreshBills(); refreshCanteen()
+    if (method === 'credit') refreshKhata()
   }
 
   const saveManualBill = async (b: any) => { setAddBill(false); await api.post('/bills', b).catch(() => {}); refreshBills(); refreshCanteen() }
@@ -1221,7 +1351,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       </main>
 
       {startFor && <StartModal table={startFor} customers={customers} onStart={(o) => start(startFor, o)} onClose={() => setStartFor(null)} />}
-      {billFor && sessions[billFor.id] && <BillModal table={billFor} session={sessions[billFor.id]} now={now} onProcess={(m, d, c, u) => processBill(billFor, m, d, c, u)} onClose={() => setBillFor(null)} />}
+      {billFor && sessions[billFor.id] && <BillModal table={billFor} session={sessions[billFor.id]} now={now} onProcess={(m, d, c, u, rcId, rcName) => processBill(billFor, m, d, c, u, rcId, rcName)} onClose={() => setBillFor(null)} />}
       {frameFor && sessions[frameFor] && <FrameModal session={sessions[frameFor]} onRecord={(w, l) => recordFrame(frameFor, w, l)} onClose={() => setFrameFor(null)} />}
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
       {addBill && <AddBillModal canteen={canteen} customers={customers.map(c => c.name)} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
