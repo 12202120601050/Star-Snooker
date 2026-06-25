@@ -165,4 +165,19 @@ const getMe = async (req, res) => {
   });
 };
 
-module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe };
+// POST /api/auth/verify-pin — verify the logged-in user's password (for action gating)
+const verifyPin = async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ message: 'Password required' });
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const ok = await user.comparePassword(password);
+    if (!ok) return res.status(401).json({ message: 'Wrong PIN' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Verification failed' });
+  }
+};
+
+module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin };

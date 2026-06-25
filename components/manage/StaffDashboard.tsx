@@ -6,7 +6,7 @@ import {
   LayoutGrid, Receipt, Coffee, ClipboardCheck, BarChart3, BookUser,
   LogOut, Play, Square, Trophy, X, Plus as PlusIcon, FileText,
   Minus, ChevronDown, ChevronUp, AlertTriangle, TrendingUp, Wallet,
-  CheckCircle, Clock, Bell, Link as LinkIcon,
+  CheckCircle, Clock, Bell, Link as LinkIcon, Pencil, Trash2,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
@@ -135,6 +135,108 @@ function AlarmBanner({ tableName, message, isExpired, onExtend, onDismiss }: {
         <button onClick={() => onExtend(30)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+30m</button>
         <button onClick={() => onExtend(60)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+1hr</button>
         <button onClick={onDismiss} className="rounded-lg border border-white/15 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-white/50">OK</button>
+      </div>
+    </div>
+  )
+}
+
+// ── PIN gate modal ──
+function PinGateModal({ onVerified, onClose }: { onVerified: () => void; onClose: () => void }) {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const verify = async () => {
+    if (!pin) return
+    setBusy(true); setError('')
+    try {
+      await api.post('/auth/verify-pin', { password: pin })
+      onVerified()
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Wrong PIN')
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-ink/85 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-72 rounded-2xl border border-gold/25 bg-ink-2 p-6 shadow-2xl">
+        <h3 className="mb-1 font-display text-[0.72rem] font-bold uppercase tracking-widest text-gold">Admin PIN Required</h3>
+        <p className="mb-4 text-[0.68rem] text-white/35">Enter your login PIN to continue</p>
+        <input
+          type="password" autoFocus value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && verify()}
+          placeholder="••••"
+          className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl tracking-[0.3em] text-white outline-none focus:border-gold"
+          maxLength={6}
+        />
+        {error && <p className="mt-2 text-center text-[0.72rem] text-red-light">{error}</p>}
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+          <button onClick={verify} disabled={busy} className="flex-1 rounded-lg bg-gold py-2 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-50">
+            {busy ? '…' : 'Verify'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit bill modal ──
+function EditBillModal({ bill, onSaved, onClose }: { bill: Bill; onSaved: () => void; onClose: () => void }) {
+  const [pm, setPm] = useState(bill.paymentMethod as 'cash' | 'upi' | 'split' | 'credit')
+  const [discount, setDiscount] = useState(String((bill as any).discount ?? 0))
+  const [note, setNote] = useState(bill.note ?? '')
+  const [custName, setCustName] = useState(bill.customerName ?? '')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    setBusy(true)
+    const disc = Math.min(100, Math.max(0, Number(discount) || 0))
+    const base = (bill.amount || 0) + (bill.canteenAmount || 0)
+    const total = Math.round(base * (1 - disc / 100))
+    try {
+      await api.put(`/bills/${bill._id}`, { paymentMethod: pm, discount: disc, total, note, customerName: custName })
+      onSaved(); onClose()
+    } catch { setBusy(false) }
+  }
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-sm rounded-2xl border border-white/12 bg-ink-2 p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-white">Edit Bill</h3>
+            <p className="text-[0.65rem] text-white/35">{bill.tableName} · {rupee(bill.total)}</p>
+          </div>
+          <button onClick={onClose}><X size={16} className="text-white/40" /></button>
+        </div>
+        <div className="mb-3">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Payment Method</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {(['cash', 'upi', 'split', 'credit'] as const).map((m) => (
+              <button key={m} onClick={() => setPm(m)} className={`rounded-md px-3 py-1 font-display text-[0.68rem] font-bold uppercase transition-colors ${pm === m ? 'bg-gold text-ink' : 'border border-white/15 text-white/50 hover:border-white/30'}`}>{m}</button>
+            ))}
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Customer Name</label>
+          <input value={custName} onChange={(e) => setCustName(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+        </div>
+        <div className="mb-3">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Discount %</label>
+          <input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} min={0} max={100} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+          {Number(discount) > 0 && (
+            <p className="mt-1 text-[0.65rem] text-white/40">
+              New total: {rupee(Math.round(((bill.amount || 0) + (bill.canteenAmount || 0)) * (1 - Number(discount) / 100)))}
+            </p>
+          )}
+        </div>
+        <div className="mb-5">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Note</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note…" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+          <button onClick={save} disabled={busy} className="flex-1 rounded-lg bg-gold py-2 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+        </div>
       </div>
     </div>
   )
@@ -921,11 +1023,36 @@ function KhataTab({ onBillCreated }: { onBillCreated?: () => void }) {
   const [search, setSearch] = useState('')
   const [payFor, setPayFor] = useState<KhataCustomer | null>(null)
   const [payType, setPayType] = useState<'got' | 'gave'>('got')
+  const [khataPinGate, setKhataPinGate] = useState<{ onVerified: () => void } | null>(null)
+  const [editCust, setEditCust] = useState<KhataCustomer | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
+  const { user } = useAuth()
+  const isAdmin = (user as any)?.role === 'admin'
 
   const loadAll = async () => {
     try { const { data } = await api.get('/khata'); setCustomers(data) } catch {}
   }
   useEffect(() => { loadAll() }, [])
+
+  const openEdit = (c: KhataCustomer) => {
+    setEditCust(c); setEditName(c.name); setEditPhone(c.phone || '')
+  }
+  const saveEdit = async () => {
+    if (!editCust) return
+    setEditBusy(true)
+    try {
+      await api.put(`/customers/${editCust._id}`, { name: editName, phone: editPhone })
+      await loadAll(); setEditCust(null)
+    } catch {}
+    setEditBusy(false)
+  }
+  const deleteCustomer = async (c: KhataCustomer) => {
+    await api.delete(`/customers/${c._id}`).catch(() => {})
+    if (expanded === c._id) setExpanded(null)
+    await loadAll()
+  }
 
   const loadTxns = async (id: string) => {
     if (txns[id]) return
@@ -1007,6 +1134,18 @@ function KhataTab({ onBillCreated }: { onBillCreated?: () => void }) {
                   {bal === 0 && (
                     <button onClick={() => { setPayFor(c); setPayType('gave') }} className="rounded-lg border border-white/12 px-2 py-1 text-[0.62rem] font-bold uppercase text-white/40 hover:text-white">+ Credit</button>
                   )}
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => setKhataPinGate({ onVerified: () => { setKhataPinGate(null); openEdit(c) } })}
+                        className="rounded p-1 text-white/20 hover:text-gold transition-colors" title="Edit customer"
+                      ><Pencil size={12} /></button>
+                      <button
+                        onClick={() => setKhataPinGate({ onVerified: () => { setKhataPinGate(null); deleteCustomer(c) } })}
+                        className="rounded p-1 text-white/20 hover:text-red-light transition-colors" title="Delete customer"
+                      ><Trash2 size={12} /></button>
+                    </>
+                  )}
                   <button onClick={() => toggle(c)} className="text-white/30 hover:text-white">
                     {isExp ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
@@ -1043,6 +1182,29 @@ function KhataTab({ onBillCreated }: { onBillCreated?: () => void }) {
         })}
       </div>
       {payFor && <PayModal customer={payFor} type={payType} onSubmit={(amt, note, pm) => submit(amt, note, pm)} onClose={() => setPayFor(null)} />}
+      {khataPinGate && <PinGateModal onVerified={khataPinGate.onVerified} onClose={() => setKhataPinGate(null)} />}
+      {editCust && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && setEditCust(null)}>
+          <div className="w-full max-w-xs rounded-2xl border border-white/12 bg-ink-2 p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-white">Edit Customer</h3>
+              <button onClick={() => setEditCust(null)}><X size={16} className="text-white/40" /></button>
+            </div>
+            <div className="mb-3">
+              <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Name</label>
+              <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+            </div>
+            <div className="mb-5">
+              <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Phone</label>
+              <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} type="tel" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditCust(null)} className="flex-1 rounded-lg border border-white/15 py-2 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+              <button onClick={saveEdit} disabled={editBusy || !editName} className="flex-1 rounded-lg bg-gold py-2 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-50">{editBusy ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1110,6 +1272,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [cancelFor, setCancelFor] = useState<TableConfig | null>(null)
   const [addBill, setAddBill] = useState(false)
   const [showReport, setShowReport] = useState(false)
+  const [pinGate, setPinGate] = useState<{ onVerified: () => void } | null>(null)
+  const [editBill, setEditBill] = useState<Bill | null>(null)
   const polling = useRef(false)
 
   // Alarm state
@@ -1500,8 +1664,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
               ? <p className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center text-[0.85rem] text-white/35">No bills today.</p>
               : bills.map((b) => (
                 <div key={b._id} className="rounded-lg border border-white/8 bg-white/[0.02] px-4 py-3 text-[0.82rem]">
-                  <div className="flex items-start justify-between">
-                    <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                       <span className="font-semibold text-white/85">{b.tableName}</span>
                       <span className={`ml-2 text-[0.7rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : b.paymentMethod === 'cash' ? 'text-green-400' : 'text-white/35'}`}>{b.paymentMethod}</span>
                       <div className="text-[0.68rem] text-white/35">
@@ -1512,7 +1676,21 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                         }
                       </div>
                     </div>
-                    <span className="font-display font-bold text-gold">{rupee(b.total)}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-display font-bold text-gold">{rupee(b.total)}</span>
+                      {admin && (
+                        <>
+                          <button
+                            onClick={() => setPinGate({ onVerified: () => { setPinGate(null); setEditBill(b) } })}
+                            className="rounded p-1 text-white/20 hover:text-gold transition-colors" title="Edit bill"
+                          ><Pencil size={12} /></button>
+                          <button
+                            onClick={() => setPinGate({ onVerified: () => { setPinGate(null); api.delete(`/bills/${b._id}`).then(refreshBills).catch(() => {}) } })}
+                            className="rounded p-1 text-white/20 hover:text-red-light transition-colors" title="Delete bill"
+                          ><Trash2 size={12} /></button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   {b.paymentMethod === 'split' && (
                     <div className="mt-1.5 flex gap-4 text-[0.68rem]">
@@ -1537,6 +1715,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
       {addBill && <AddBillModal canteen={canteen} customers={customers} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
       {showReport && <ShiftReportModal canteen={canteen} onClose={() => setShowReport(false)} />}
+      {pinGate && <PinGateModal onVerified={pinGate.onVerified} onClose={() => setPinGate(null)} />}
+      {editBill && <EditBillModal bill={editBill} onSaved={refreshBills} onClose={() => setEditBill(null)} />}
     </div>
   )
 }

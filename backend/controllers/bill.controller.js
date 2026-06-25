@@ -72,6 +72,31 @@ exports.getBills = async (req, res) => {
   }
 };
 
+// PUT /api/bills/:id
+exports.updateBill = async (req, res) => {
+  try {
+    const allowed = ['tableName', 'amount', 'canteenAmount', 'discount', 'total', 'paymentMethod', 'cashAmount', 'upiAmount', 'note', 'customerName'];
+    const update = {};
+    for (const k of allowed) if (req.body[k] !== undefined) update[k] = req.body[k];
+    const bill = await Bill.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!bill) return res.status(404).json({ message: 'Bill not found' });
+    res.json(bill);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update bill' });
+  }
+};
+
+// DELETE /api/bills/:id
+exports.deleteBill = async (req, res) => {
+  try {
+    const bill = await Bill.findByIdAndDelete(req.params.id);
+    if (!bill) return res.status(404).json({ message: 'Bill not found' });
+    res.json({ message: 'Bill deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to delete bill' });
+  }
+};
+
 // GET /api/bills/today
 exports.getTodayBills = async (req, res) => {
   try {
