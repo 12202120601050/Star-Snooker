@@ -35,7 +35,8 @@ type Bill = {
   _id: string; tableName: string; mode: string; amount: number
   canteenAmount: number; total: number; paymentMethod: string
   cashAmount?: number; upiAmount?: number; customerName?: string
-  createdAt: string; note?: string
+  createdAt: string; note?: string; duration?: number
+  timeIn?: string; timeOut?: string
   canteenItems?: Array<{ itemId: string; name: string; qty: number; price: number }>
 }
 type KhataCustomer = {
@@ -96,6 +97,18 @@ function playAlarmSound(expired = false) {
       beep(660, 0, 0.15); beep(880, 0.2, 0.15)
     }
   } catch {}
+}
+
+const fmtTime = (d: Date) =>
+  d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+
+const hhmm24 = (d: Date) =>
+  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+
+const hhmmTo12 = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
 }
 
 const DURATIONS = [
@@ -592,10 +605,21 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: {
   const [resolvedId, setResolvedId] = useState<string | null>(null)
   const [resolvedName, setResolvedName] = useState<string | null>(null)
 
+  const nowDate = new Date()
+  const [startTime, setStartTime] = useState(() => hhmm24(new Date(nowDate.getTime() - 60 * 60000)))
+  const [endTime, setEndTime] = useState(() => hhmm24(nowDate))
+
   const t = TABLES.find((x) => x.id === tableId)!
   const cAmt = canteen.reduce((a, i) => a + (cart[i._id] || 0) * i.price, 0)
   const play = kind === 'table' ? Number(amount) || t.hour || 0 : 0
   const total = play + cAmt
+
+  const calcDuration = () => {
+    const [sh, sm] = startTime.split(':').map(Number)
+    const [eh, em] = endTime.split(':').map(Number)
+    const diff = (eh * 60 + em) - (sh * 60 + sm)
+    return diff > 0 ? diff : 0
+  }
   const handleCashChange = (v: string) => { setCashAmt(v); setUpiAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const handleUpiChange = (v: string) => { setUpiAmt(v); setCashAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const splitValid = pm !== 'split' || (Number(cashAmt) + Number(upiAmt) === total && total > 0)
@@ -636,6 +660,20 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: {
             <div><label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Amount ₹</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`${t.hour}`} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" /></div>
           </div>
         )}
+        <label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Session Time</label>
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex-1">
+            <label className="mb-0.5 block text-[0.6rem] uppercase tracking-wider text-white/30">Start</label>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" />
+          </div>
+          <span className="mt-5 text-white/30">→</span>
+          <div className="flex-1">
+            <label className="mb-0.5 block text-[0.6rem] uppercase tracking-wider text-white/30">End</label>
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" />
+          </div>
+          <div className="mt-5 text-right text-[0.7rem] text-white/35 min-w-[48px]">{calcDuration()} min</div>
+        </div>
+
         <label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Canteen items</label>
         <div className="mb-3 grid grid-cols-2 gap-1.5">
           {canteen.map((i) => (
@@ -706,11 +744,13 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: {
             const finalCustomerId = resolvedId || custId || null
             const finalCustomerName = resolvedName || (custId ? cust : cust)
             const items = canteen.filter((i) => cart[i._id]).map((i) => ({ itemId: i._id, name: i.name, price: i.price, qty: cart[i._id] }))
+            const dur = calcDuration()
             onAdd({
               tableId: kind === 'canteen' ? 'counter' : tableId,
               tableName: kind === 'canteen' ? 'Counter' : t.name,
               mode: kind === 'canteen' ? 'canteen' : 'timer',
               amount: play, canteenAmount: cAmt, canteenItems: items, total,
+              duration: dur, timeIn: hhmmTo12(startTime), timeOut: hhmmTo12(endTime),
               paymentMethod: pm, customerName: finalCustomerName, customerId: finalCustomerId,
               cashAmount: pm === 'cash' ? total : pm === 'split' ? Number(cashAmt) : 0,
               upiAmount: pm === 'upi' ? total : pm === 'split' ? Number(upiAmt) : 0,
@@ -904,14 +944,16 @@ function KhataTab({ onBillCreated }: { onBillCreated?: () => void }) {
     await api.post(`/khata/${payFor._id}`, { type: payType, amount: amt, note }).catch(() => {})
     // When receiving credit payment, create a bill so it appears in finance tab
     if (payType === 'got') {
+      const t = new Date()
       await api.post('/bills', {
-        tableId: 'khata', tableName: 'Khata Payment',
-        mode: 'khata_payment', amount: amt, canteenAmount: 0, canteenItems: [],
+        tableId: 'khata', tableName: 'Credit Collected',
+        mode: 'canteen', amount: amt, canteenAmount: 0, canteenItems: [],
         discount: 0, total: amt, paymentMethod: payMethod,
         cashAmount: payMethod === 'cash' ? amt : 0,
         upiAmount: payMethod === 'upi' ? amt : 0,
         customerName: payFor.name, customerId: payFor._id,
-        note: note || `Credit payment from ${payFor.name}`,
+        timeIn: fmtTime(t), timeOut: fmtTime(t),
+        note: note || `Credit collected from ${payFor.name}`,
       }).catch(() => {})
       onBillCreated?.()
     }
@@ -1214,11 +1256,15 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     const resolvedUpi = method === 'upi' ? total : method === 'split' ? (upiAmt ?? 0) : 0
     const finalCustomerId = resolvedCustomerId || s.customerId || null
     const finalCustomerName = resolvedCustomerName || s.customerName || 'Walk-in'
+    const endNow = new Date()
+    const billTimeIn = fmtTime(new Date(s.startTime))
+    const billTimeOut = fmtTime(endNow)
     setBillFor(null)
     await cancel(t.id)
     await api.post('/bills', {
       tableId: t.id, tableName: t.name, mode: s.mode,
       duration: Math.round((Date.now() - s.startTime) / 60000),
+      timeIn: billTimeIn, timeOut: billTimeOut,
       frames: s.framesWonBy.length, players: s.players,
       amount: play, canteenAmount: canteenAmt, canteenItems: s.cart || [],
       discount: disc, total, paymentMethod: method,
@@ -1457,8 +1503,14 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                   <div className="flex items-start justify-between">
                     <div>
                       <span className="font-semibold text-white/85">{b.tableName}</span>
-                      <span className={`ml-2 text-[0.7rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : 'text-white/35'}`}>{b.paymentMethod}</span>
-                      <div className="text-[0.68rem] text-white/35">{b.customerName} · {new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <span className={`ml-2 text-[0.7rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : b.paymentMethod === 'cash' ? 'text-green-400' : 'text-white/35'}`}>{b.paymentMethod}</span>
+                      <div className="text-[0.68rem] text-white/35">
+                        {b.customerName}
+                        {b.timeIn && b.timeOut
+                          ? <span className="ml-1.5 text-white/50">{b.timeIn} <span className="text-white/25">→</span> {b.timeOut}{b.duration ? <span className="ml-1 text-white/25">({b.duration}m)</span> : null}</span>
+                          : <span className="ml-1.5">{new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                        }
+                      </div>
                     </div>
                     <span className="font-display font-bold text-gold">{rupee(b.total)}</span>
                   </div>
@@ -1668,7 +1720,16 @@ function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]
         {bills.slice(0, 100).map((b) => (
           <div key={b._id} className="rounded-lg border border-white/8 bg-white/[0.02] px-4 py-2 text-[0.8rem]">
             <div className="flex items-center justify-between">
-              <div><span className="text-white/85">{b.tableName}</span> <span className={`text-[0.66rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : b.paymentMethod === 'cash' ? 'text-green-400' : 'text-white/35'}`}>{b.paymentMethod}</span><div className="text-[0.64rem] text-white/35">{b.customerName} · {new Date(b.createdAt).toLocaleDateString('en-IN')} · {new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></div>
+              <div>
+                <span className="text-white/85">{b.tableName}</span> <span className={`text-[0.66rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : b.paymentMethod === 'cash' ? 'text-green-400' : 'text-white/35'}`}>{b.paymentMethod}</span>
+                <div className="text-[0.64rem] text-white/35">
+                  {b.customerName} · {new Date(b.createdAt).toLocaleDateString('en-IN')}
+                  {b.timeIn && b.timeOut
+                    ? <span className="ml-1.5 text-white/50">{b.timeIn} <span className="text-white/25">→</span> {b.timeOut}{b.duration ? <span className="ml-1 text-white/25">({b.duration}m)</span> : null}</span>
+                    : <span className="ml-1.5">{new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                  }
+                </div>
+              </div>
               <span className="font-display font-bold text-gold">{rupee(b.total)}</span>
             </div>
             {b.paymentMethod === 'split' && <div className="mt-1 flex gap-3 text-[0.65rem]"><span className="text-green-400">Cash {rupee(b.cashAmount || 0)}</span><span style={{ color: '#23c2ff' }}>UPI {rupee(b.upiAmount || 0)}</span></div>}
