@@ -39,13 +39,10 @@ exports.seed = async (req, res) => {
   }
 };
 
-// DELETE /api/setup/reset?key=SEED_KEY — wipes all transactional data.
+// DELETE /api/setup/reset — wipes all transactional data. Admin JWT required.
 // Keeps Users. Intended for one-time test-data cleanup only.
 exports.reset = async (req, res) => {
   try {
-    if (!process.env.SEED_KEY || req.query.key !== process.env.SEED_KEY) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
     const db = mongoose.connection.db;
     const WIPE = ['bills', 'activesessions', 'customers', 'khatatransactions', 'canteentransactions', 'stockcounts', 'bookings', 'leaderboards'];
     const existing = (await db.listCollections().toArray()).map(c => c.name.toLowerCase());
