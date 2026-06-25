@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const CanteenItem = require('../models/CanteenItem');
 
@@ -35,5 +36,30 @@ exports.seed = async (req, res) => {
     res.json({ ok: true, message: 'Setup complete. Change the default PINs after first login.', result });
   } catch (err) {
     res.status(500).json({ message: 'Setup failed', error: err.message });
+  }
+};
+
+// DELETE /api/setup/reset?key=SEED_KEY — wipes all transactional data.
+// Keeps Users. Intended for one-time test-data cleanup only.
+exports.reset = async (req, res) => {
+  try {
+    if (!process.env.SEED_KEY || req.query.key !== process.env.SEED_KEY) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+    const db = mongoose.connection.db;
+    const WIPE = ['bills', 'activesessions', 'customers', 'khatatransactions', 'canteentransactions', 'stockcounts', 'bookings', 'leaderboards'];
+    const existing = (await db.listCollections().toArray()).map(c => c.name.toLowerCase());
+    const results = {};
+    for (const name of WIPE) {
+      if (existing.includes(name)) {
+        const r = await db.collection(name).deleteMany({});
+        results[name] = r.deletedCount;
+      } else {
+        results[name] = 'not found';
+      }
+    }
+    res.json({ ok: true, message: 'Database reset complete. Users untouched.', results });
+  } catch (err) {
+    res.status(500).json({ message: 'Reset failed', error: err.message });
   }
 };
