@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const User = require('../models/User');
 const CanteenItem = require('../models/CanteenItem');
 
@@ -39,24 +38,3 @@ exports.seed = async (req, res) => {
   }
 };
 
-// DELETE /api/setup/reset — wipes all transactional data. Admin JWT required.
-// Keeps Users. Intended for one-time test-data cleanup only.
-exports.reset = async (req, res) => {
-  try {
-    const db = mongoose.connection.db;
-    const WIPE = ['bills', 'activesessions', 'customers', 'khatatransactions', 'canteentransactions', 'stockcounts', 'bookings', 'leaderboards'];
-    const existing = (await db.listCollections().toArray()).map(c => c.name.toLowerCase());
-    const results = {};
-    for (const name of WIPE) {
-      if (existing.includes(name)) {
-        const r = await db.collection(name).deleteMany({});
-        results[name] = r.deletedCount;
-      } else {
-        results[name] = 'not found';
-      }
-    }
-    res.json({ ok: true, message: 'Database reset complete. Users untouched.', results });
-  } catch (err) {
-    res.status(500).json({ message: 'Reset failed', error: err.message });
-  }
-};
