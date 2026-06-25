@@ -6,10 +6,11 @@ import { GAMES } from '@/lib/site'
 
 const ICONS: Record<string, string> = {
   snooker: '🎱',
-  pool: '🎳',
-  carrom: '🪃',
+  pool: '🔵',
+  carrom: '🎯',
   tabletennis: '🏓',
   chess: '♟',
+  zapminton: '🏸',
 }
 
 const COLORS: Record<string, { from: string; to: string; accent: string }> = {
@@ -18,6 +19,7 @@ const COLORS: Record<string, { from: string; to: string; accent: string }> = {
   carrom: { from: 'from-amber-900/20', to: 'to-amber-950/5', accent: 'text-amber-400' },
   tabletennis: { from: 'from-red-900/20', to: 'to-red-950/5', accent: 'text-red-400' },
   chess: { from: 'from-white/5', to: 'to-white/0', accent: 'text-white/70' },
+  zapminton: { from: 'from-purple-900/20', to: 'to-purple-950/5', accent: 'text-purple-400' },
 }
 
 function TiltCard({ children, className }: { children: React.ReactNode; className?: string }) {

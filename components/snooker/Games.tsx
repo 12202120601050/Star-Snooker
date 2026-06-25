@@ -1,4 +1,4 @@
-import { Target, CircleDot, Grid2x2, Disc3, Crown, type LucideIcon } from 'lucide-react'
+import { Target, CircleDot, Grid2x2, Disc3, Crown, Zap, type LucideIcon } from 'lucide-react'
 import { GAMES, bookUrl, type Game } from '@/lib/site'
 import { SectionHeading } from './SectionHeading'
 import { Reveal } from '@/components/site/motion'
@@ -9,6 +9,7 @@ const ICONS: Record<Game['icon'], LucideIcon> = {
   carrom: Grid2x2,
   tabletennis: Disc3,
   chess: Crown,
+  zapminton: Zap,
 }
 
 export function Games() {

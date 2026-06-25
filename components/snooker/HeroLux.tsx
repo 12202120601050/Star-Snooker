@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { m, useScroll, useTransform } from 'framer-motion'
 import { ChevronDown, MapPin, Clock } from 'lucide-react'
 import { SITE, LINKS } from '@/lib/site'
+import { Logo } from '@/components/snooker/Logo'
 
 const BilliardScene = dynamic(() => import('@/components/three/BilliardScene'), {
   ssr: false,
@@ -90,17 +91,22 @@ export function HeroLux() {
               transition={{ delay: 0.4, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
               className="mb-6 font-display font-bold uppercase leading-[0.88]"
             >
-              <span className="block text-white" style={{ fontSize: 'clamp(3.8rem,9.5vw,7.5rem)' }}>
-                Star
-              </span>
+              <div className="flex items-center gap-5 mb-2">
+                <Logo size={72} />
+                <div>
+                  <span className="block text-white" style={{ fontSize: 'clamp(3.8rem,9.5vw,7.5rem)' }}>
+                    Star
+                  </span>
+                  <span
+                    className="shimmer-text block"
+                    style={{ fontSize: 'clamp(3.8rem,9.5vw,7.5rem)' }}
+                  >
+                    Snooker
+                  </span>
+                </div>
+              </div>
               <span
-                className="shimmer-text block"
-                style={{ fontSize: 'clamp(3.8rem,9.5vw,7.5rem)' }}
-              >
-                Snooker
-              </span>
-              <span
-                className="mt-3 block tracking-[0.5em] text-white/25"
+                className="mt-1 block tracking-[0.5em] text-white/25"
                 style={{ fontSize: 'clamp(1rem,3vw,2.2rem)' }}
               >
                 ACADEMY
@@ -171,7 +177,7 @@ export function HeroLux() {
               <div className="mb-5 grid grid-cols-3 gap-2">
                 {[
                   { v: '9', l: 'Tables' },
-                  { v: '5', l: 'Games' },
+                  { v: '6', l: 'Games' },
                   { v: '₹50', l: 'From/hr' },
                 ].map((s) => (
                   <div

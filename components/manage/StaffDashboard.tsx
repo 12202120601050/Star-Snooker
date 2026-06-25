@@ -67,7 +67,7 @@ const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
 }
 
 const tableEmoji = (id: string) => {
-  if (id.startsWith('big')) return '🟢'
+  if (id.startsWith('royal') || id.startsWith('big')) return '🟢'
   if (id.startsWith('mini')) return '🎱'
   if (id.startsWith('pool')) return '🔵'
   if (id === 'carrom') return '🎯'
@@ -75,6 +75,27 @@ const tableEmoji = (id: string) => {
   if (id === 'chess') return '♟️'
   if (id === 'zapminton') return '🏸'
   return '🎮'
+}
+
+function playAlarmSound(expired = false) {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const beep = (freq: number, start: number, dur: number, vol = 0.4) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.type = 'sine'; osc.frequency.value = freq
+      gain.gain.setValueAtTime(0, ctx.currentTime + start)
+      gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.02)
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + start + dur)
+      osc.start(ctx.currentTime + start); osc.stop(ctx.currentTime + start + dur + 0.05)
+    }
+    if (expired) {
+      beep(880, 0, 0.18); beep(880, 0.22, 0.18); beep(1100, 0.44, 0.35)
+    } else {
+      beep(660, 0, 0.15); beep(880, 0.2, 0.15)
+    }
+  } catch {}
 }
 
 const DURATIONS = [
@@ -548,15 +569,29 @@ function BillModal({ table, session, now, onProcess, onClose }: {
 }
 
 // ── Add Bill modal ──
-function AddBillModal({ canteen, customers, onAdd, onClose }: { canteen: Item[]; customers: string[]; onAdd: (b: any) => void; onClose: () => void }) {
+function AddBillModal({ canteen, customers, onAdd, onClose }: {
+  canteen: Item[]
+  customers: Array<{ _id: string; name: string; balance?: number }>
+  onAdd: (b: any) => void; onClose: () => void
+}) {
   const [kind, setKind] = useState<'table' | 'canteen'>('table')
   const [tableId, setTableId] = useState(TABLES[0].id)
   const [amount, setAmount] = useState('')
   const [cust, setCust] = useState('Walk-in')
+  const [custId, setCustId] = useState<string | null>(null)
   const [pm, setPm] = useState('cash')
   const [cashAmt, setCashAmt] = useState('')
   const [upiAmt, setUpiAmt] = useState('')
   const [cart, setCart] = useState<Record<string, number>>({})
+  // Credit registration
+  const [regName, setRegName] = useState('')
+  const [regPhone, setRegPhone] = useState('')
+  const [regState, setRegState] = useState<'idle' | 'busy' | 'done' | 'exists'>('idle')
+  const [regError, setRegError] = useState('')
+  const [regPin, setRegPin] = useState('')
+  const [resolvedId, setResolvedId] = useState<string | null>(null)
+  const [resolvedName, setResolvedName] = useState<string | null>(null)
+
   const t = TABLES.find((x) => x.id === tableId)!
   const cAmt = canteen.reduce((a, i) => a + (cart[i._id] || 0) * i.price, 0)
   const play = kind === 'table' ? Number(amount) || t.hour || 0 : 0
@@ -564,6 +599,26 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: { canteen: Item[];
   const handleCashChange = (v: string) => { setCashAmt(v); setUpiAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const handleUpiChange = (v: string) => { setUpiAmt(v); setCashAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const splitValid = pm !== 'split' || (Number(cashAmt) + Number(upiAmt) === total && total > 0)
+  const needsReg = pm === 'credit' && !custId
+  const creditReady = !needsReg || regState === 'done'
+  const canSave = total > 0 && splitValid && creditReady
+
+  const registerCustomer = async () => {
+    if (!regName.trim() || !regPhone.trim()) { setRegError('Name and phone are required'); return }
+    if (regPhone.replace(/\D/g,'').length < 10) { setRegError('Enter a valid 10-digit phone number'); return }
+    setRegState('busy'); setRegError('')
+    try {
+      const { data } = await api.post('/customers', { name: regName.trim(), phone: regPhone.trim() })
+      setResolvedId(data._id); setResolvedName(data.name)
+      setRegPin(data.defaultPin || regPhone.replace(/\D/g,'').slice(-4))
+      setRegState('done')
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || ''
+      setRegState(msg.toLowerCase().includes('already') ? 'exists' : 'idle')
+      setRegError(msg || 'Registration failed')
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gold/25 bg-ink-2 p-5">
@@ -592,14 +647,19 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: { canteen: Item[];
         </div>
         <label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Customer</label>
         <div className="mb-2 flex flex-wrap gap-1.5">
-          <button onClick={() => setCust('Walk-in')} className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === 'Walk-in' ? 'text-white' : 'border border-white/12 text-white/55'}`} style={cust === 'Walk-in' ? { background: '#1f8a4c' } : undefined}>Walk-in</button>
-          {customers.map((c) => <button key={c} onClick={() => setCust(c)} className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === c ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>{c}</button>)}
+          <button onClick={() => { setCust('Walk-in'); setCustId(null) }} className={`rounded-md px-2.5 py-1 text-[0.72rem] ${cust === 'Walk-in' ? 'text-white' : 'border border-white/12 text-white/55'}`} style={cust === 'Walk-in' ? { background: '#1f8a4c' } : undefined}>Walk-in</button>
+          {customers.map((c) => (
+            <button key={c._id} onClick={() => { setCust(c.name); setCustId(c._id); setRegName(c.name) }} className={`relative rounded-md px-2.5 py-1 text-[0.72rem] ${cust === c.name && custId === c._id ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>
+              {c.name}
+              {(c.balance || 0) > 0 && <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-light text-[0.45rem] font-bold text-white">!</span>}
+            </button>
+          ))}
         </div>
-        <input value={cust === 'Walk-in' ? '' : cust} onChange={(e) => setCust(e.target.value || 'Walk-in')} placeholder="Or type name…" className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" />
+        <input value={cust === 'Walk-in' ? '' : cust} onChange={(e) => { setCust(e.target.value || 'Walk-in'); setCustId(null); setRegName(e.target.value) }} placeholder="Or type name…" className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" />
         <label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Payment Method</label>
         <div className="mb-3 flex gap-1.5">
           {['cash', 'upi', 'split', 'credit'].map((m) => (
-            <button key={m} onClick={() => { setPm(m); setCashAmt(''); setUpiAmt('') }} className={`flex-1 rounded-lg py-1.5 text-[0.68rem] font-bold uppercase ${pm === m ? 'bg-gold text-ink' : 'border border-white/12 text-white/50'}`}>{m}</button>
+            <button key={m} onClick={() => { setPm(m); setCashAmt(''); setUpiAmt(''); setRegState('idle'); setRegError('') }} className={`flex-1 rounded-lg py-1.5 text-[0.68rem] font-bold uppercase ${pm === m ? 'bg-gold text-ink' : 'border border-white/12 text-white/50'}`}>{m}</button>
           ))}
         </div>
         {pm === 'split' && total > 0 && (
@@ -611,15 +671,56 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: { canteen: Item[];
             </div>
           </div>
         )}
+        {/* Credit registration — same as BillModal */}
+        {pm === 'credit' && (
+          custId ? (
+            <div className="mb-3 rounded-xl border border-red-light/20 bg-red-light/[0.05] px-3 py-2">
+              <p className="text-[0.72rem] text-red-light">⚠ {rupee(total)} will be added to <span className="font-bold text-white">{cust}</span>'s khata as outstanding balance.</p>
+            </div>
+          ) : regState === 'done' ? (
+            <div className="mb-3 rounded-xl border border-green-400/30 bg-green-400/[0.05] px-4 py-3">
+              <div className="flex items-center gap-2 mb-1"><CheckCircle size={14} className="text-green-400" /><span className="text-[0.78rem] font-bold text-green-400">Registered!</span></div>
+              <div className="text-[0.72rem] text-white/70"><span className="font-semibold text-white">{resolvedName}</span> · {regPhone}</div>
+              <div className="mt-2 flex items-center gap-2 rounded-lg bg-ink/60 px-3 py-1.5">
+                <span className="text-[0.65rem] uppercase tracking-wider text-white/40">Default PIN</span>
+                <span className="font-display text-sm font-bold tracking-widest text-gold">{regPin}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-xl border border-gold/20 bg-gold/[0.03] p-4">
+              <div className="mb-2 flex items-center gap-2"><BookUser size={13} className="text-gold" /><span className="font-display text-[0.68rem] font-bold uppercase text-gold">Register to track credit in Khata</span></div>
+              <div className="space-y-2">
+                <input value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="Customer name" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+                <input value={regPhone} onChange={(e) => { setRegPhone(e.target.value); setRegError(''); setRegState('idle') }} placeholder="10-digit phone number" type="tel" inputMode="numeric" maxLength={10} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+                {regError && <p className="text-[0.68rem] text-red-light">{regError}</p>}
+                {regState === 'exists' && <p className="text-[0.65rem] text-orange-400">Phone already registered — search in Khata tab.</p>}
+                <button onClick={registerCustomer} disabled={regState === 'busy'} className="w-full rounded-lg bg-gold py-2 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-50">{regState === 'busy' ? 'Registering…' : '✓ Register & Continue'}</button>
+              </div>
+            </div>
+          )
+        )}
         <div className="mb-3 flex justify-between rounded-lg bg-white/[0.03] px-3 py-2"><span className="text-[0.8rem] text-white/50">Total</span><span className="font-display font-bold text-gold">{rupee(total)}</span></div>
         <button
           onClick={() => {
-            if (total <= 0 || !splitValid) return
+            if (!canSave) return
+            const finalCustomerId = resolvedId || custId || null
+            const finalCustomerName = resolvedName || (custId ? cust : cust)
             const items = canteen.filter((i) => cart[i._id]).map((i) => ({ itemId: i._id, name: i.name, price: i.price, qty: cart[i._id] }))
-            onAdd({ tableId: kind === 'canteen' ? 'counter' : tableId, tableName: kind === 'canteen' ? 'Counter' : t.name, mode: kind === 'canteen' ? 'canteen' : 'timer', amount: play, canteenAmount: cAmt, canteenItems: items, total, paymentMethod: pm, customerName: cust, cashAmount: pm === 'cash' ? total : pm === 'split' ? Number(cashAmt) : 0, upiAmount: pm === 'upi' ? total : pm === 'split' ? Number(upiAmt) : 0 })
+            onAdd({
+              tableId: kind === 'canteen' ? 'counter' : tableId,
+              tableName: kind === 'canteen' ? 'Counter' : t.name,
+              mode: kind === 'canteen' ? 'canteen' : 'timer',
+              amount: play, canteenAmount: cAmt, canteenItems: items, total,
+              paymentMethod: pm, customerName: finalCustomerName, customerId: finalCustomerId,
+              cashAmount: pm === 'cash' ? total : pm === 'split' ? Number(cashAmt) : 0,
+              upiAmount: pm === 'upi' ? total : pm === 'split' ? Number(upiAmt) : 0,
+            })
           }}
-          className="w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white"
-        >💾 Save Bill</button>
+          disabled={!canSave}
+          className={`w-full rounded-lg py-3 font-display text-sm font-bold uppercase tracking-wider text-white ${canSave ? 'bg-red' : 'cursor-not-allowed bg-white/10 text-white/30'}`}
+        >
+          {needsReg && regState !== 'done' ? '🔒 Register customer first' : '💾 Save Bill'}
+        </button>
       </div>
     </div>
   )
@@ -773,7 +874,7 @@ function ShiftReportModal({ canteen, onClose }: { canteen: Item[]; onClose: () =
 }
 
 // ── Khata tab ──
-function KhataTab() {
+function KhataTab({ onBillCreated }: { onBillCreated?: () => void }) {
   const [customers, setCustomers] = useState<KhataCustomer[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [txns, setTxns] = useState<Record<string, KhataTransaction[]>>({})
@@ -797,14 +898,29 @@ function KhataTab() {
     await loadTxns(c._id)
   }
 
-  const submit = async (amount: string, note: string) => {
+  const submit = async (amount: string, note: string, payMethod: 'cash' | 'upi') => {
     if (!payFor || !amount || Number(amount) <= 0) return
-    await api.post(`/khata/${payFor._id}`, { type: payType, amount: Number(amount), note }).catch(() => {})
+    const amt = Number(amount)
+    await api.post(`/khata/${payFor._id}`, { type: payType, amount: amt, note }).catch(() => {})
+    // When receiving credit payment, create a bill so it appears in finance tab
+    if (payType === 'got') {
+      await api.post('/bills', {
+        tableId: 'khata', tableName: 'Khata Payment',
+        mode: 'khata_payment', amount: amt, canteenAmount: 0, canteenItems: [],
+        discount: 0, total: amt, paymentMethod: payMethod,
+        cashAmount: payMethod === 'cash' ? amt : 0,
+        upiAmount: payMethod === 'upi' ? amt : 0,
+        customerName: payFor.name, customerId: payFor._id,
+        note: note || `Credit payment from ${payFor.name}`,
+      }).catch(() => {})
+      onBillCreated?.()
+    }
+    const prev = payFor
     setPayFor(null)
     await loadAll()
-    if (expanded === payFor._id) {
-      const { data } = await api.get(`/khata/${payFor._id}`).catch(() => ({ data: null })) as any
-      if (data) setTxns(p => ({ ...p, [payFor._id]: data.transactions || [] }))
+    if (expanded === prev._id) {
+      const { data } = await api.get(`/khata/${prev._id}`).catch(() => ({ data: null })) as any
+      if (data) setTxns(p => ({ ...p, [prev._id]: data.transactions || [] }))
     }
   }
 
@@ -884,17 +1000,18 @@ function KhataTab() {
           )
         })}
       </div>
-      {payFor && <PayModal customer={payFor} type={payType} onSubmit={submit} onClose={() => setPayFor(null)} />}
+      {payFor && <PayModal customer={payFor} type={payType} onSubmit={(amt, note, pm) => submit(amt, note, pm)} onClose={() => setPayFor(null)} />}
     </div>
   )
 }
 
 function PayModal({ customer, type, onSubmit, onClose }: {
   customer: KhataCustomer; type: 'got' | 'gave'
-  onSubmit: (amount: string, note: string) => void; onClose: () => void
+  onSubmit: (amount: string, note: string, payMethod: 'cash' | 'upi') => void; onClose: () => void
 }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [payMethod, setPayMethod] = useState<'cash' | 'upi'>('cash')
   const bal = customer.balance || 0
   const isReceiving = type === 'got'
   return (
@@ -912,10 +1029,19 @@ function PayModal({ customer, type, onSubmit, onClose }: {
         {isReceiving && bal > 0 && (
           <button onClick={() => setAmount(String(bal))} className="mb-3 w-full rounded-lg border border-green-400/20 py-1.5 text-[0.7rem] font-bold uppercase text-green-400">Full amount ({rupee(bal)})</button>
         )}
+        {isReceiving && (
+          <>
+            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Received via</label>
+            <div className="mb-3 flex gap-2">
+              <button onClick={() => setPayMethod('cash')} className={`flex-1 rounded-lg py-2 text-[0.72rem] font-bold uppercase ${payMethod === 'cash' ? 'bg-green-600 text-white' : 'border border-white/12 text-white/50'}`}>Cash</button>
+              <button onClick={() => setPayMethod('upi')} className={`flex-1 rounded-lg py-2 text-[0.72rem] font-bold uppercase ${payMethod === 'upi' ? 'text-white' : 'border border-white/12 text-white/50'}`} style={payMethod === 'upi' ? { background: '#23c2ff' } : undefined}>UPI</button>
+            </div>
+          </>
+        )}
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Note (optional)</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isReceiving ? 'e.g. Cash payment' : 'e.g. Snooker session'} className="mb-4 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
         <button
-          onClick={() => onSubmit(amount, note)}
+          onClick={() => onSubmit(amount, note, payMethod)}
           disabled={!amount || Number(amount) <= 0}
           className={`w-full rounded-lg py-3 font-display text-sm font-bold uppercase tracking-wider text-white ${Number(amount) > 0 ? (isReceiving ? 'bg-green-600' : 'bg-red') : 'cursor-not-allowed bg-white/10'}`}
         >
@@ -962,10 +1088,12 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
         const expKey = `${tableId}:expire:${sess.selectedDuration}:${sess.startTime}`
         if (remaining <= 5 && remaining > 0 && !alarmFiredRef.current.has(warnKey)) {
           alarmFiredRef.current.add(warnKey)
+          playAlarmSound(false)
           setActiveAlarm({ tableId, tableName: sess.tableName, message: `⚠ ${Math.ceil(remaining)} min left!`, isExpired: false })
         }
         if (remaining <= 0 && !alarmFiredRef.current.has(expKey)) {
           alarmFiredRef.current.add(expKey)
+          playAlarmSound(true)
           setActiveAlarm({ tableId, tableName: sess.tableName, message: `⏰ Time's up! Please bill or extend.`, isExpired: true })
         }
       } else {
@@ -973,6 +1101,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
           const key = `${tableId}:${mark}min:${sess.startTime}`
           if (elapsedMin >= mark && !alarmFiredRef.current.has(key)) {
             alarmFiredRef.current.add(key)
+            playAlarmSound(false)
             setActiveAlarm(prev => prev || { tableId, tableName: sess.tableName, message: `🕐 ${mark} minutes elapsed`, isExpired: false })
           }
         }
@@ -1019,7 +1148,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     const elapsedMin = (now - s.startTime) / 60000
     const newDuration = s.selectedDuration
       ? s.selectedDuration + addMin
-      : Math.ceil(elapsedMin / 30) * 30 + addMin
+      : Math.round(elapsedMin) + addMin
     setSessions(p => ({ ...p, [tableId]: { ...p[tableId], selectedDuration: newDuration } }))
     await api.patch(`/sessions/${tableId}`, { selectedDuration: newDuration }).catch(() => {})
     setActiveAlarm(null)
@@ -1346,7 +1475,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 
         {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} />}
         {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
-        {tab === 'khata' && <KhataTab />}
+        {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
         {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} onShowReport={() => setShowReport(true)} />}
       </main>
 
@@ -1354,7 +1483,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {billFor && sessions[billFor.id] && <BillModal table={billFor} session={sessions[billFor.id]} now={now} onProcess={(m, d, c, u, rcId, rcName) => processBill(billFor, m, d, c, u, rcId, rcName)} onClose={() => setBillFor(null)} />}
       {frameFor && sessions[frameFor] && <FrameModal session={sessions[frameFor]} onRecord={(w, l) => recordFrame(frameFor, w, l)} onClose={() => setFrameFor(null)} />}
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
-      {addBill && <AddBillModal canteen={canteen} customers={customers.map(c => c.name)} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
+      {addBill && <AddBillModal canteen={canteen} customers={customers} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
       {showReport && <ShiftReportModal canteen={canteen} onClose={() => setShowReport(false)} />}
     </div>
   )
@@ -1539,7 +1668,7 @@ function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]
         {bills.slice(0, 100).map((b) => (
           <div key={b._id} className="rounded-lg border border-white/8 bg-white/[0.02] px-4 py-2 text-[0.8rem]">
             <div className="flex items-center justify-between">
-              <div><span className="text-white/85">{b.tableName}</span> <span className={`text-[0.66rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : 'text-white/35'}`}>{b.paymentMethod}</span><div className="text-[0.64rem] text-white/35">{b.customerName} · {new Date(b.createdAt).toLocaleDateString('en-IN')}</div></div>
+              <div><span className="text-white/85">{b.tableName}</span> <span className={`text-[0.66rem] uppercase ${b.paymentMethod === 'credit' ? 'text-red-light' : b.paymentMethod === 'cash' ? 'text-green-400' : 'text-white/35'}`}>{b.paymentMethod}</span><div className="text-[0.64rem] text-white/35">{b.customerName} · {new Date(b.createdAt).toLocaleDateString('en-IN')} · {new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div></div>
               <span className="font-display font-bold text-gold">{rupee(b.total)}</span>
             </div>
             {b.paymentMethod === 'split' && <div className="mt-1 flex gap-3 text-[0.65rem]"><span className="text-green-400">Cash {rupee(b.cashAmount || 0)}</span><span style={{ color: '#23c2ff' }}>UPI {rupee(b.upiAmount || 0)}</span></div>}

@@ -15,8 +15,8 @@ export type TableConfig = {
 // games. Frame charge is editable when starting a frames/loser-pays session
 // (e.g. carrom/TT 2-vs-4 players).
 export const TABLES: TableConfig[] = [
-  { id: 'big1', name: 'Big Snooker 1', frame: 120, hour: 240 },
-  { id: 'big2', name: 'Big Snooker 2', frame: 120, hour: 200 },
+  { id: 'big1', name: 'Royal Snooker 1', frame: 120, hour: 240 },
+  { id: 'big2', name: 'Royal Snooker 2', frame: 120, hour: 200 },
   { id: 'mini1', name: 'Mini Snooker 1', frame: 80, hour: 150 },
   { id: 'mini2', name: 'Mini Snooker 2', frame: 80, hour: 150 },
   { id: 'mini3', name: 'Mini Snooker 3', frame: 80, hour: 150 },
