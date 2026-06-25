@@ -14,6 +14,7 @@ const activeSessionSchema = new mongoose.Schema({
   hourRate:     { type: Number, default: 0 },
   frameCharge:  { type: Number, default: 0 },
   players:      { type: [String], default: [] },  // names, for frames/loser-pays
+  playerIds:    { type: [String], default: [] },  // registered customer IDs per player
   framesWonBy:  { type: [Number], default: [] },  // winner index per frame
   framesLostBy: { type: [Number], default: [] },  // loser index per frame (multi-player)
   selectedDuration: { type: Number, default: null }, // fixed booking in minutes

@@ -3,7 +3,7 @@ const ActiveSession = require('../models/ActiveSession');
 // Whitelist of writable fields (prevents NoSQL-operator injection / mass-assignment).
 const FIELDS = [
   'tableName', 'mode', 'status', 'startTime', 'pausedAt', 'totalPausedMs',
-  'hourRate', 'frameCharge', 'players', 'framesWonBy', 'framesLostBy',
+  'hourRate', 'frameCharge', 'players', 'playerIds', 'framesWonBy', 'framesLostBy',
   'selectedDuration', 'customerName', 'customerId', 'cart', 'note',
 ];
 

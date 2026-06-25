@@ -27,6 +27,7 @@ export const TABLES: TableConfig[] = [
   { id: 'carrom', name: 'Carrom', frame: 60, hour: 100 },
   { id: 'tt', name: 'Table Tennis', frame: 60, hour: 100 },
   { id: 'chess', name: 'Chess', frame: 50, hour: 50 },
+  { id: 'zapminton', name: 'Zapminton', frame: 60, hour: 100 },
 ]
 
 export type CartItem = { itemId: string; name: string; price: number; qty: number }
@@ -114,9 +115,9 @@ export function fmtDuration(ms: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
-// Hourly bill, prorated to the minute.
+// Hourly bill — minimum 30 min charge, then prorated to the minute.
 export function timerAmount(hourRate: number, ms: number): number {
-  const hours = ms / 3_600_000
+  const hours = Math.max(0.5, ms / 3_600_000)
   return Math.round(hours * hourRate)
 }
 

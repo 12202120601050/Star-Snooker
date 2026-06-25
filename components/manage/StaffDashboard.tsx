@@ -6,7 +6,7 @@ import {
   LayoutGrid, Receipt, Coffee, ClipboardCheck, BarChart3, BookUser,
   LogOut, Play, Square, Trophy, X, Plus as PlusIcon, FileText,
   Minus, ChevronDown, ChevronUp, AlertTriangle, TrendingUp, Wallet,
-  CheckCircle, Clock,
+  CheckCircle, Clock, Bell, Link as LinkIcon,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
@@ -22,6 +22,7 @@ type ApiSession = {
   hourRate: number
   frameCharge: number
   players: string[]
+  playerIds?: string[]
   framesWonBy: number[]
   framesLostBy?: number[]
   selectedDuration?: number
@@ -35,6 +36,7 @@ type Bill = {
   canteenAmount: number; total: number; paymentMethod: string
   cashAmount?: number; upiAmount?: number; customerName?: string
   createdAt: string; note?: string
+  canteenItems?: Array<{ itemId: string; name: string; qty: number; price: number }>
 }
 type KhataCustomer = {
   _id: string; name: string; phone?: string; balance: number
@@ -48,7 +50,6 @@ type KhataTransaction = {
 const frameTotals = (s: ApiSession) => {
   const n = Math.max(2, s.players?.length || 2)
   const owed = new Array(n).fill(0) as number[]
-  // Use framesLostBy if available, else derive from framesWonBy (2-player compat)
   const losses = s.framesLostBy?.length
     ? s.framesLostBy
     : (s.framesWonBy || []).map(w => (w === 0 ? 1 : 0))
@@ -65,6 +66,17 @@ const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
   return timerAmount(rate, now - s.startTime)
 }
 
+const tableEmoji = (id: string) => {
+  if (id.startsWith('big')) return '🟢'
+  if (id.startsWith('mini')) return '🎱'
+  if (id.startsWith('pool')) return '🔵'
+  if (id === 'carrom') return '🎯'
+  if (id === 'tt') return '🏓'
+  if (id === 'chess') return '♟️'
+  if (id === 'zapminton') return '🏸'
+  return '🎮'
+}
+
 const DURATIONS = [
   { label: '30 min', minutes: 30 },
   { label: '1 hr',  minutes: 60 },
@@ -72,6 +84,27 @@ const DURATIONS = [
   { label: '2 hr',  minutes: 120 },
   { label: 'Open',  minutes: 0 },
 ]
+
+// ── Alarm banner ──
+function AlarmBanner({ tableName, message, isExpired, onExtend, onDismiss }: {
+  tableName: string; message: string; isExpired: boolean
+  onExtend: (min: number) => void; onDismiss: () => void
+}) {
+  return (
+    <div className={`mx-auto mb-4 flex items-center gap-3 rounded-2xl p-4 max-w-content ${isExpired ? 'border border-red-light/40 bg-red-light/10 animate-pulse' : 'border border-yellow-400/40 bg-yellow-400/8'}`}>
+      <Bell size={20} className={isExpired ? 'shrink-0 text-red-light' : 'shrink-0 text-yellow-400'} />
+      <div className="flex-1 min-w-0">
+        <div className={`font-display text-[0.82rem] font-bold ${isExpired ? 'text-red-light' : 'text-yellow-400'}`}>{tableName}</div>
+        <div className="text-[0.72rem] text-white/60">{message}</div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button onClick={() => onExtend(30)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+30m</button>
+        <button onClick={() => onExtend(60)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+1hr</button>
+        <button onClick={onDismiss} className="rounded-lg border border-white/15 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-white/50">OK</button>
+      </div>
+    </div>
+  )
+}
 
 // ── Start modal ──
 function StartModal({ table, customers, onStart, onClose }: {
@@ -83,6 +116,8 @@ function StartModal({ table, customers, onStart, onClose }: {
   const [cust, setCust] = useState('Walk-in')
   const [custId, setCustId] = useState<string | null>(null)
   const [players, setPlayers] = useState(['Player 1', 'Player 2'])
+  const [playerIds, setPlayerIds] = useState<string[]>(['', ''])
+  const [playerPicker, setPlayerPicker] = useState<number | null>(null)
   const [hourRate, setHourRate] = useState(table.hour ?? 0)
   const [frameCharge, setFrameCharge] = useState(table.frame ?? 0)
   const [durationMin, setDurationMin] = useState(0)
@@ -91,15 +126,33 @@ function StartModal({ table, customers, onStart, onClose }: {
 
   const fixedAmount = durationMin > 0 ? Math.round(hourRate * (durationMin / 60)) : null
 
-  const addPlayer = () => { if (players.length < 5) setPlayers([...players, `Player ${players.length + 1}`]) }
-  const removePlayer = (i: number) => { if (players.length > 2) setPlayers(players.filter((_, j) => j !== i)) }
-  const updatePlayer = (i: number, v: string) => setPlayers(players.map((p, j) => j === i ? v : p))
+  const addPlayer = () => {
+    if (players.length < 5) {
+      setPlayers([...players, `Player ${players.length + 1}`])
+      setPlayerIds([...playerIds, ''])
+    }
+  }
+  const removePlayer = (i: number) => {
+    if (players.length > 2) {
+      setPlayers(players.filter((_, j) => j !== i))
+      setPlayerIds(playerIds.filter((_, j) => j !== i))
+    }
+  }
+  const updatePlayer = (i: number, v: string) => {
+    setPlayers(players.map((p, j) => j === i ? v : p))
+    setPlayerIds(playerIds.map((id, j) => j === i ? '' : id)) // unlink if typing manually
+  }
+  const linkPlayer = (i: number, c: { _id: string; name: string }) => {
+    setPlayers(players.map((p, j) => j === i ? c.name : p))
+    setPlayerIds(playerIds.map((id, j) => j === i ? c._id : id))
+    setPlayerPicker(null)
+  }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); setPlayerPicker(null) }}>
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-gold/25 bg-ink-2 p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-display text-base font-bold uppercase text-white">▶ Start {table.name}</h3>
+          <h3 className="font-display text-base font-bold uppercase text-white">{tableEmoji(table.id)} Start {table.name}</h3>
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={18} /></button>
         </div>
 
@@ -133,7 +186,7 @@ function StartModal({ table, customers, onStart, onClose }: {
           </div>
         ) : (
           <>
-            <div className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Charge ₹/frame</div>
+            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Charge ₹/frame</label>
             <input type="number" value={frameCharge} onChange={(e) => setFrameCharge(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
             <div className="mb-1 flex items-center justify-between">
               <label className="text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Players</label>
@@ -143,16 +196,48 @@ function StartModal({ table, customers, onStart, onClose }: {
             </div>
             <div className="mb-3 space-y-1.5">
               {players.map((p, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input value={p} onChange={(e) => updatePlayer(i, e.target.value)} className="flex-1 rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
-                  {players.length > 2 && (
-                    <button onClick={() => removePlayer(i)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light">
-                      <Minus size={14} />
-                    </button>
+                <div key={i} className="relative">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        value={p}
+                        onChange={(e) => updatePlayer(i, e.target.value)}
+                        placeholder={`Player ${i + 1}`}
+                        className={`w-full rounded-lg border px-3 py-2 pr-8 text-sm text-white outline-none focus:border-gold ${playerIds[i] ? 'border-gold/40 bg-gold/5' : 'border-white/15 bg-ink'}`}
+                      />
+                      <button
+                        onClick={() => setPlayerPicker(playerPicker === i ? null : i)}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 ${playerIds[i] ? 'text-gold' : 'text-white/25 hover:text-white/60'}`}
+                        title="Link to registered customer"
+                      >
+                        <LinkIcon size={13} />
+                      </button>
+                    </div>
+                    {players.length > 2 && (
+                      <button onClick={() => removePlayer(i)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light">
+                        <Minus size={14} />
+                      </button>
+                    )}
+                  </div>
+                  {playerPicker === i && (
+                    <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border border-gold/25 bg-ink-2 py-1 shadow-xl">
+                      {customers.length === 0 && <div className="px-3 py-2 text-[0.72rem] text-white/35">No registered customers</div>}
+                      {customers.map((c) => (
+                        <button key={c._id} onClick={() => linkPlayer(i, c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
+                          <span>{c.name}</span>
+                          {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               ))}
             </div>
+            {players.some((_, i) => playerIds[i]) && (
+              <div className="mb-3 rounded-lg border border-gold/15 bg-gold/[0.04] px-3 py-2 text-[0.68rem] text-white/40">
+                <span className="text-gold">🔗 Linked:</span> {players.filter((_, i) => playerIds[i]).join(', ')} — frame debts will auto-update their khata.
+              </div>
+            )}
           </>
         )}
 
@@ -179,7 +264,7 @@ function StartModal({ table, customers, onStart, onClose }: {
         {custId && (customers.find(c => c._id === custId)?.balance || 0) > 0 && (
           <div className="mb-2 flex items-center gap-2 rounded-lg border border-red-light/25 bg-red-light/[0.06] px-3 py-1.5">
             <AlertTriangle size={12} className="shrink-0 text-red-light" />
-            <span className="text-[0.68rem] text-red-light">Outstanding balance: {rupee(customers.find(c => c._id === custId)!.balance!)}</span>
+            <span className="text-[0.68rem] text-red-light">Outstanding: {rupee(customers.find(c => c._id === custId)!.balance!)}</span>
           </div>
         )}
         <input
@@ -204,6 +289,7 @@ function StartModal({ table, customers, onStart, onClose }: {
           onClick={() => onStart({
             mode, customerName: cust, customerId: custId, hourRate, frameCharge,
             players: mode === 'frames' ? players : [],
+            playerIds: mode === 'frames' ? playerIds : [],
             startTime: Date.now() - Number(agoMin || 0) * 60000,
             selectedDuration: durationMin > 0 ? durationMin : undefined,
           })}
@@ -233,7 +319,6 @@ function FrameModal({ session, onRecord, onClose }: {
           <h3 className="font-display text-sm font-bold uppercase text-white">Record Frame</h3>
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={16} /></button>
         </div>
-
         <label className="mb-2 block text-[0.65rem] font-bold uppercase tracking-wider text-green-400">Who won?</label>
         <div className="mb-4 grid grid-cols-2 gap-1.5">
           {session.players.map((p, i) => (
@@ -242,7 +327,6 @@ function FrameModal({ session, onRecord, onClose }: {
             </button>
           ))}
         </div>
-
         <label className="mb-2 block text-[0.65rem] font-bold uppercase tracking-wider text-red-light">Who lost?</label>
         <div className="mb-4 grid grid-cols-2 gap-1.5">
           {session.players.map((p, i) => (
@@ -251,7 +335,6 @@ function FrameModal({ session, onRecord, onClose }: {
             </button>
           ))}
         </div>
-
         <button
           onClick={() => ready && onRecord(winner!, loser!)}
           disabled={!ready}
@@ -278,6 +361,9 @@ function BillModal({ table, session, now, onProcess, onClose }: {
   const [upiAmt, setUpiAmt] = useState('')
   const d = Math.min(Number(disc) || 0, play + canteen)
   const total = play + canteen - d
+  const isUnregistered = !session.customerId && session.customerName !== 'Walk-in'
+  const frameMode = session.mode === 'frames'
+  const ft = frameMode ? frameTotals(session) : null
 
   const handleCashChange = (v: string) => { setCashAmt(v); setUpiAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const handleUpiChange = (v: string) => { setUpiAmt(v); setCashAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
@@ -291,7 +377,16 @@ function BillModal({ table, session, now, onProcess, onClose }: {
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={18} /></button>
         </div>
         <div className="mb-3 space-y-1.5 rounded-xl bg-white/[0.03] p-3 text-[0.85rem]">
-          <div className="flex justify-between text-white/60"><span>{session.mode === 'frames' ? `Frames (${session.framesWonBy.length})` : 'Table time'}</span><span className="text-white">{rupee(play)}</span></div>
+          {frameMode && ft ? (
+            session.players.map((p, i) => ft.owed[i] > 0 && (
+              <div key={i} className="flex justify-between text-white/60">
+                <span>{p || `P${i+1}`}</span>
+                <span className="text-red-light font-display font-bold">{rupee(ft.owed[i])}</span>
+              </div>
+            ))
+          ) : (
+            <div className="flex justify-between text-white/60"><span>Table time</span><span className="text-white">{rupee(play)}</span></div>
+          )}
           {canteen > 0 && <div className="flex justify-between text-white/60"><span>Canteen</span><span className="text-white">{rupee(canteen)}</span></div>}
           {d > 0 && <div className="flex justify-between text-green-400"><span>Discount</span><span>-{rupee(d)}</span></div>}
           <div className="flex justify-between border-t border-white/10 pt-1.5 font-display font-bold"><span>Total</span><span className="text-gold">{rupee(total)}</span></div>
@@ -315,8 +410,14 @@ function BillModal({ table, session, now, onProcess, onClose }: {
           </div>
         )}
         {pm === 'credit' && (
-          <div className="mb-3 rounded-xl border border-red-light/20 bg-red-light/[0.05] px-3 py-2">
-            <p className="text-[0.72rem] text-red-light">⚠ This will be added to the customer's khata as outstanding balance.</p>
+          <div className={`mb-3 rounded-xl border px-3 py-2 ${isUnregistered ? 'border-orange-400/30 bg-orange-400/[0.05]' : 'border-red-light/20 bg-red-light/[0.05]'}`}>
+            {isUnregistered ? (
+              <p className="text-[0.72rem] text-orange-400">⚠ "{session.customerName}" is not a registered customer — khata will NOT be updated. Register them first to track credit.</p>
+            ) : frameMode && (session.playerIds || []).some(id => !id) ? (
+              <p className="text-[0.72rem] text-orange-400">⚠ Some players are not linked to registered customers — their khata may not be updated. Link players in the session to fix this.</p>
+            ) : (
+              <p className="text-[0.72rem] text-red-light">⚠ Amount will be added to {frameMode ? "players'" : `${session.customerName}'s`} khata as outstanding balance.</p>
+            )}
           </div>
         )}
         <button onClick={() => splitValid && onProcess(pm, d, pm === 'split' ? Number(cashAmt) : undefined, pm === 'split' ? Number(upiAmt) : undefined)} disabled={!splitValid} className={`w-full rounded-lg py-3 font-display text-sm font-bold uppercase tracking-wider text-white ${splitValid ? 'bg-red' : 'cursor-not-allowed bg-red/40'}`}>
@@ -357,7 +458,7 @@ function AddBillModal({ canteen, customers, onAdd, onClose }: { canteen: Item[];
         </div>
         {kind === 'table' && (
           <div className="mb-3 grid grid-cols-2 gap-2">
-            <div><label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Table</label><select value={tableId} onChange={(e) => setTableId(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white">{TABLES.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
+            <div><label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Table</label><select value={tableId} onChange={(e) => setTableId(e.target.value)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white">{TABLES.map((x) => <option key={x.id} value={x.id}>{tableEmoji(x.id)} {x.name}</option>)}</select></div>
             <div><label className="mb-1 block text-[0.7rem] uppercase tracking-wider text-white/40">Amount ₹</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`${t.hour}`} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white" /></div>
           </div>
         )}
@@ -437,9 +538,22 @@ function CancelModal({ table, session, now, onConfirm, onClose }: {
   )
 }
 
-// ── Day Close Report modal ──
-function ShiftReportModal({ bills, onClose }: { bills: Bill[]; onClose: () => void }) {
-  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+// ── Day Close Report modal (with date picker + canteen stock) ──
+function ShiftReportModal({ canteen, onClose }: { canteen: Item[]; onClose: () => void }) {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [date, setDate] = useState(todayStr)
+  const [bills, setBills] = useState<Bill[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.get('/bills', { params: { from: date, to: date } })
+      .then(r => setBills(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setBills([]))
+      .finally(() => setLoading(false))
+  }, [date])
+
+  const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const cash = bills.reduce((a, b) => b.paymentMethod === 'cash' ? a + b.total : b.paymentMethod === 'split' ? a + (b.cashAmount || 0) : a, 0)
   const upi = bills.reduce((a, b) => b.paymentMethod === 'upi' ? a + b.total : b.paymentMethod === 'split' ? a + (b.upiAmount || 0) : a, 0)
   const credit = bills.filter((b) => b.paymentMethod === 'credit').reduce((a, b) => a + b.total, 0)
@@ -449,49 +563,91 @@ function ShiftReportModal({ bills, onClose }: { bills: Bill[]; onClose: () => vo
   const tablePlay = bills.filter((b) => b.mode !== 'canteen').reduce((a, b) => a + (b.amount || 0), 0)
   const canteenSales = bills.reduce((a, b) => a + (b.canteenAmount || 0), 0)
   const byTable = bills.reduce((acc, b) => { if (b.mode === 'canteen') return acc; acc[b.tableName] = (acc[b.tableName] || 0) + b.total; return acc }, {} as Record<string, number>)
+
+  // Canteen sold quantities from bills
+  const soldMap: Record<string, number> = {}
+  bills.forEach(b => (b.canteenItems || []).forEach(ci => { soldMap[ci.name] = (soldMap[ci.name] || 0) + ci.qty }))
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gold/25 bg-ink-2 p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <div><h3 className="font-display text-lg font-bold uppercase text-white">Day Close Report</h3><p className="text-[0.72rem] text-white/40">{today}</p></div>
+        <div className="mb-4 flex items-center justify-between">
+          <div><h3 className="font-display text-lg font-bold uppercase text-white">Day Close Report</h3><p className="text-[0.72rem] text-white/40">{dateLabel}</p></div>
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={18} /></button>
         </div>
-        <div className="mb-4 grid grid-cols-2 gap-2">
-          <div className="rounded-xl bg-white/[0.03] p-4 text-center"><div className="font-display text-xl font-bold text-gold">{rupee(total)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/40">Total Revenue</div></div>
-          <div className="rounded-xl bg-white/[0.03] p-4 text-center"><div className="font-display text-xl font-bold text-green-400">{rupee(cash + upi)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/40">Collected</div></div>
+
+        {/* Date picker */}
+        <div className="mb-5 flex items-center gap-2">
+          <button onClick={() => setDate(d => { const dt = new Date(d); dt.setDate(dt.getDate() - 1); return dt.toISOString().split('T')[0] })} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.7rem] text-white/60 hover:border-gold hover:text-gold">‹ Prev</button>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} max={todayStr} className="flex-1 rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-center text-[0.78rem] text-white" />
+          <button onClick={() => setDate(d => { const dt = new Date(d); dt.setDate(dt.getDate() + 1); const t = dt.toISOString().split('T')[0]; return t <= todayStr ? t : d })} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.7rem] text-white/60 hover:border-gold hover:text-gold">Next ›</button>
+          <button onClick={() => setDate(todayStr)} className="rounded-lg bg-gold/15 px-3 py-1.5 text-[0.7rem] font-bold text-gold">Today</button>
         </div>
-        <div className="mb-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Payment Breakdown</h4>
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-green-400" /><span className="text-white/70">Cash</span></div><span className="font-display font-bold text-green-400">{rupee(cash)}</span></div>
-            <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full" style={{ background: '#23c2ff' }} /><span className="text-white/70">UPI</span></div><span className="font-display font-bold" style={{ color: '#23c2ff' }}>{rupee(upi)}</span></div>
-            {splitTotal > 0 && <div className="rounded-lg border border-white/8 bg-white/[0.02] p-2.5">
-              <div className="mb-1.5 flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-gold" /><span className="text-white/70">Split ({splitBills.length} bills)</span></div><span className="font-display font-bold text-gold">{rupee(splitTotal)}</span></div>
-              <div className="ml-4 space-y-0.5">
-                <div className="flex justify-between text-[0.72rem] text-white/40"><span>↳ Cash portion</span><span className="text-green-400">{rupee(splitBills.reduce((a, b) => a + (b.cashAmount || 0), 0))}</span></div>
-                <div className="flex justify-between text-[0.72rem] text-white/40"><span>↳ UPI portion</span><span style={{ color: '#23c2ff' }}>{rupee(splitBills.reduce((a, b) => a + (b.upiAmount || 0), 0))}</span></div>
+
+        {loading ? (
+          <div className="py-10 text-center text-[0.85rem] text-white/35">Loading…</div>
+        ) : bills.length === 0 ? (
+          <div className="py-10 text-center text-[0.85rem] text-white/35">No bills found for this date.</div>
+        ) : (
+          <>
+            <div className="mb-4 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-white/[0.03] p-4 text-center"><div className="font-display text-xl font-bold text-gold">{rupee(total)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/40">Total Revenue</div></div>
+              <div className="rounded-xl bg-white/[0.03] p-4 text-center"><div className="font-display text-xl font-bold text-green-400">{rupee(cash + upi)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/40">Collected</div></div>
+            </div>
+            <div className="mb-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
+              <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Payment Breakdown</h4>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-green-400" /><span className="text-white/70">Cash</span></div><span className="font-display font-bold text-green-400">{rupee(cash)}</span></div>
+                <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full" style={{ background: '#23c2ff' }} /><span className="text-white/70">UPI</span></div><span className="font-display font-bold" style={{ color: '#23c2ff' }}>{rupee(upi)}</span></div>
+                {splitTotal > 0 && <div className="rounded-lg border border-white/8 bg-white/[0.02] p-2.5">
+                  <div className="mb-1.5 flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-gold" /><span className="text-white/70">Split ({splitBills.length})</span></div><span className="font-display font-bold text-gold">{rupee(splitTotal)}</span></div>
+                  <div className="ml-4 space-y-0.5">
+                    <div className="flex justify-between text-[0.72rem] text-white/40"><span>↳ Cash portion</span><span className="text-green-400">{rupee(splitBills.reduce((a, b) => a + (b.cashAmount || 0), 0))}</span></div>
+                    <div className="flex justify-between text-[0.72rem] text-white/40"><span>↳ UPI portion</span><span style={{ color: '#23c2ff' }}>{rupee(splitBills.reduce((a, b) => a + (b.upiAmount || 0), 0))}</span></div>
+                  </div>
+                </div>}
+                {credit > 0 && <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-red-light" /><span className="text-white/70">Credit (pending)</span></div><span className="font-display font-bold text-red-light">{rupee(credit)}</span></div>}
               </div>
-            </div>}
-            {credit > 0 && <div className="flex items-center justify-between text-[0.85rem]"><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 rounded-full bg-red-light" /><span className="text-white/70">Credit (pending)</span></div><span className="font-display font-bold text-red-light">{rupee(credit)}</span></div>}
-          </div>
-          {total > 0 && <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-white/10"><div className="bg-green-400" style={{ width: `${(cash / total) * 100}%` }} /><div style={{ width: `${(upi / total) * 100}%`, background: '#23c2ff' }} />{credit > 0 && <div className="bg-red-light" style={{ width: `${(credit / total) * 100}%` }} />}</div>}
-        </div>
-        <div className="mb-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Revenue Source</h4>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-gold">{rupee(tablePlay)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Table Play</div></div>
-            <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-gold">{rupee(canteenSales)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Canteen</div></div>
-            <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-white/70">{bills.length}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Bills</div></div>
-          </div>
-        </div>
-        {Object.keys(byTable).length > 0 && <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Table-wise Revenue</h4>
-          <div className="space-y-1.5">
-            {Object.entries(byTable).sort(([, a], [, b]) => b - a).map(([name, amt]) => (
-              <div key={name} className="flex items-center justify-between text-[0.82rem]"><span className="text-white/60">{name}</span><span className="font-display font-bold text-gold">{rupee(amt)}</span></div>
-            ))}
-          </div>
-        </div>}
+              {total > 0 && <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-white/10"><div className="bg-green-400" style={{ width: `${(cash / total) * 100}%` }} /><div style={{ width: `${(upi / total) * 100}%`, background: '#23c2ff' }} />{credit > 0 && <div className="bg-red-light" style={{ width: `${(credit / total) * 100}%` }} />}</div>}
+            </div>
+            <div className="mb-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
+              <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Revenue Source</h4>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-gold">{rupee(tablePlay)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Table Play</div></div>
+                <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-gold">{rupee(canteenSales)}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Canteen</div></div>
+                <div className="rounded-lg bg-white/[0.03] p-3 text-center"><div className="font-display text-base font-bold text-white/70">{bills.length}</div><div className="text-[0.58rem] uppercase tracking-wider text-white/35">Bills</div></div>
+              </div>
+            </div>
+            {Object.keys(byTable).length > 0 && (
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/[0.02] p-4">
+                <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Table-wise Revenue</h4>
+                <div className="space-y-1.5">
+                  {Object.entries(byTable).sort(([, a], [, b]) => b - a).map(([name, amt]) => (
+                    <div key={name} className="flex items-center justify-between text-[0.82rem]"><span className="text-white/60">{name}</span><span className="font-display font-bold text-gold">{rupee(amt)}</span></div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Canteen stock */}
+            {canteen.length > 0 && (
+              <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
+                <h4 className="mb-3 text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Canteen — Sold & Remaining</h4>
+                <div className="overflow-hidden rounded-lg border border-white/8">
+                  <div className="grid grid-cols-[1fr_auto_auto] border-b border-white/8 bg-white/5 px-3 py-2 text-[0.6rem] font-bold uppercase tracking-wider text-white/40">
+                    <span>Item</span><span className="w-14 text-center">Sold today</span><span className="w-14 text-center">Remaining</span>
+                  </div>
+                  {canteen.map(i => (
+                    <div key={i._id} className="grid grid-cols-[1fr_auto_auto] items-center px-3 py-2 text-[0.8rem]">
+                      <span className="text-white/80">{i.name} <span className="text-white/35">₹{i.price}</span></span>
+                      <span className={`w-14 text-center font-display font-bold ${soldMap[i.name] ? 'text-gold' : 'text-white/25'}`}>{soldMap[i.name] || 0}</span>
+                      <span className={`w-14 text-center font-display font-bold ${i.stock <= 2 ? 'text-red-light' : 'text-green-400'}`}>{i.stock}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
@@ -513,10 +669,7 @@ function KhataTab() {
 
   const loadTxns = async (id: string) => {
     if (txns[id]) return
-    try {
-      const { data } = await api.get(`/khata/${id}`)
-      setTxns(p => ({ ...p, [id]: data.transactions || [] }))
-    } catch {}
+    try { const { data } = await api.get(`/khata/${id}`); setTxns(p => ({ ...p, [id]: data.transactions || [] })) } catch {}
   }
 
   const toggle = async (c: KhataCustomer) => {
@@ -530,7 +683,6 @@ function KhataTab() {
     await api.post(`/khata/${payFor._id}`, { type: payType, amount: Number(amount), note }).catch(() => {})
     setPayFor(null)
     await loadAll()
-    // Refresh expanded customer's transactions
     if (expanded === payFor._id) {
       const { data } = await api.get(`/khata/${payFor._id}`).catch(() => ({ data: null })) as any
       if (data) setTxns(p => ({ ...p, [payFor._id]: data.transactions || [] }))
@@ -545,7 +697,6 @@ function KhataTab() {
 
   return (
     <div>
-      {/* Summary */}
       <div className="mb-4 flex items-center justify-between rounded-2xl border border-red-light/20 bg-red-light/[0.04] px-5 py-4">
         <div>
           <div className="text-[0.65rem] uppercase tracking-wider text-white/40">Total Outstanding</div>
@@ -553,11 +704,7 @@ function KhataTab() {
         </div>
         <Wallet size={28} className="text-red-light/40" />
       </div>
-
-      {/* Search */}
       <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customer…" className="mb-4 w-full rounded-xl border border-white/15 bg-ink-2 px-4 py-2.5 text-sm text-white outline-none focus:border-gold" />
-
-      {/* Customer list */}
       <div className="space-y-2">
         {filtered.length === 0 && <p className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center text-[0.85rem] text-white/35">No customers found.</p>}
         {filtered.map((c) => {
@@ -565,7 +712,6 @@ function KhataTab() {
           const isExp = expanded === c._id
           return (
             <div key={c._id} className={`overflow-hidden rounded-xl border transition-all ${bal > 0 ? 'border-red-light/20' : 'border-white/8'} bg-white/[0.02]`}>
-              {/* Row */}
               <div className="flex items-center px-4 py-3">
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-[0.88rem] text-white">{c.name}</div>
@@ -589,8 +735,6 @@ function KhataTab() {
                   </button>
                 </div>
               </div>
-
-              {/* Transactions (expanded) */}
               {isExp && (
                 <div className="border-t border-white/8 bg-white/[0.01]">
                   {!txns[c._id] ? (
@@ -621,8 +765,6 @@ function KhataTab() {
           )
         })}
       </div>
-
-      {/* Payment / Credit modal */}
       {payFor && <PayModal customer={payFor} type={payType} onSubmit={submit} onClose={() => setPayFor(null)} />}
     </div>
   )
@@ -636,15 +778,12 @@ function PayModal({ customer, type, onSubmit, onClose }: {
   const [note, setNote] = useState('')
   const bal = customer.balance || 0
   const isReceiving = type === 'got'
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-xs rounded-2xl border border-gold/25 bg-ink-2 p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h3 className="font-display text-sm font-bold uppercase text-white">
-              {isReceiving ? '💰 Payment Received' : '📋 Give Credit'}
-            </h3>
+            <h3 className="font-display text-sm font-bold uppercase text-white">{isReceiving ? '💰 Payment Received' : '📋 Give Credit'}</h3>
             <p className="text-[0.68rem] text-white/40">{customer.name} {bal > 0 ? `· owes ${rupee(bal)}` : ''}</p>
           </div>
           <button onClick={onClose} className="text-white/50 hover:text-white"><X size={16} /></button>
@@ -652,9 +791,7 @@ function PayModal({ customer, type, onSubmit, onClose }: {
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Amount ₹</label>
         <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={isReceiving && bal > 0 ? `Full: ${bal}` : '0'} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
         {isReceiving && bal > 0 && (
-          <button onClick={() => setAmount(String(bal))} className="mb-3 w-full rounded-lg border border-green-400/20 py-1.5 text-[0.7rem] font-bold uppercase text-green-400">
-            Full amount ({rupee(bal)})
-          </button>
+          <button onClick={() => setAmount(String(bal))} className="mb-3 w-full rounded-lg border border-green-400/20 py-1.5 text-[0.7rem] font-bold uppercase text-green-400">Full amount ({rupee(bal)})</button>
         )}
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Note (optional)</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isReceiving ? 'e.g. Cash payment' : 'e.g. Snooker session'} className="mb-4 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
@@ -682,13 +819,51 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [tab, setTab] = useState<'tables' | 'bills' | 'canteen' | 'shift' | 'khata' | 'finance'>('tables')
   const [startFor, setStartFor] = useState<TableConfig | null>(null)
   const [billFor, setBillFor] = useState<TableConfig | null>(null)
-  const [frameFor, setFrameFor] = useState<string | null>(null) // tableId for frame modal
+  const [frameFor, setFrameFor] = useState<string | null>(null)
   const [cancelFor, setCancelFor] = useState<TableConfig | null>(null)
   const [addBill, setAddBill] = useState(false)
   const [showReport, setShowReport] = useState(false)
   const polling = useRef(false)
 
-  const refreshTables = async () => { try { const { data } = await api.get('/sessions'); const map: Record<string, ApiSession> = {}; for (const s of data) map[s.tableId] = s; setSessions(map) } catch {} }
+  // Alarm state
+  const [activeAlarm, setActiveAlarm] = useState<{ tableId: string; tableName: string; message: string; isExpired: boolean } | null>(null)
+  const alarmFiredRef = useRef<Set<string>>(new Set())
+  const sessionsRef = useRef<Record<string, ApiSession>>({})
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
+
+  // Alarm check on every tick
+  useEffect(() => {
+    const s = sessionsRef.current
+    Object.entries(s).forEach(([tableId, sess]) => {
+      if (sess.mode !== 'timer') return
+      const elapsedMin = (now - sess.startTime) / 60000
+      if (sess.selectedDuration) {
+        const remaining = sess.selectedDuration - elapsedMin
+        const warnKey = `${tableId}:warn:${sess.selectedDuration}:${sess.startTime}`
+        const expKey = `${tableId}:expire:${sess.selectedDuration}:${sess.startTime}`
+        if (remaining <= 5 && remaining > 0 && !alarmFiredRef.current.has(warnKey)) {
+          alarmFiredRef.current.add(warnKey)
+          setActiveAlarm({ tableId, tableName: sess.tableName, message: `⚠ ${Math.ceil(remaining)} min left!`, isExpired: false })
+        }
+        if (remaining <= 0 && !alarmFiredRef.current.has(expKey)) {
+          alarmFiredRef.current.add(expKey)
+          setActiveAlarm({ tableId, tableName: sess.tableName, message: `⏰ Time's up! Please bill or extend.`, isExpired: true })
+        }
+      } else {
+        for (const mark of [30, 60, 90, 120]) {
+          const key = `${tableId}:${mark}min:${sess.startTime}`
+          if (elapsedMin >= mark && !alarmFiredRef.current.has(key)) {
+            alarmFiredRef.current.add(key)
+            setActiveAlarm(prev => prev || { tableId, tableName: sess.tableName, message: `🕐 ${mark} minutes elapsed`, isExpired: false })
+          }
+        }
+      }
+    })
+  }, [now])
+
+  const refreshTables = async () => {
+    try { const { data } = await api.get('/sessions'); const map: Record<string, ApiSession> = {}; for (const s of data) map[s.tableId] = s; setSessions(map) } catch {}
+  }
   const refreshBills = async () => { try { const { data } = await api.get('/bills/today'); setBills(data) } catch {} }
   const refreshCanteen = async () => { try { const { data } = await api.get('/canteen'); setCanteen(data) } catch {} }
 
@@ -702,7 +877,6 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     return () => clearInterval(t)
   }, [admin])
 
-  // Registered customers from khata (includes balance for warning display)
   const customers = useMemo(
     () => khata.filter((k) => k.name).map((k) => ({ _id: k._id, name: k.name, balance: k.balance || 0 })),
     [khata]
@@ -710,8 +884,26 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 
   const start = async (t: TableConfig, o: any) => {
     setStartFor(null)
-    await api.post('/sessions', { tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime, hourRate: o.hourRate, frameCharge: o.frameCharge, players: o.players, customerName: o.customerName, customerId: o.customerId || null, cart: [], selectedDuration: o.selectedDuration }).catch(() => {})
+    await api.post('/sessions', {
+      tableId: t.id, tableName: t.name, mode: o.mode, startTime: o.startTime,
+      hourRate: o.hourRate, frameCharge: o.frameCharge,
+      players: o.players, playerIds: o.playerIds || [],
+      customerName: o.customerName, customerId: o.customerId || null,
+      cart: [], selectedDuration: o.selectedDuration,
+    }).catch(() => {})
     refreshTables()
+  }
+
+  const extendSession = async (tableId: string, addMin: number) => {
+    const s = sessions[tableId]
+    if (!s) { setActiveAlarm(null); return }
+    const elapsedMin = (now - s.startTime) / 60000
+    const newDuration = s.selectedDuration
+      ? s.selectedDuration + addMin
+      : Math.ceil(elapsedMin / 30) * 30 + addMin
+    setSessions(p => ({ ...p, [tableId]: { ...p[tableId], selectedDuration: newDuration } }))
+    await api.patch(`/sessions/${tableId}`, { selectedDuration: newDuration }).catch(() => {})
+    setActiveAlarm(null)
   }
 
   const recordFrame = async (tableId: string, winner: number, loser: number) => {
@@ -742,6 +934,15 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     await api.patch(`/sessions/${tableId}`, { cart }).catch(() => {})
   }
 
+  const removeFromCart = async (tableId: string, itemId: string) => {
+    const s = sessions[tableId]
+    const cart = (s.cart || [])
+      .map(c => c.itemId === itemId ? { ...c, qty: c.qty - 1 } : c)
+      .filter(c => c.qty > 0)
+    setSessions((p) => ({ ...p, [tableId]: { ...p[tableId], cart } }))
+    await api.patch(`/sessions/${tableId}`, { cart }).catch(() => {})
+  }
+
   const cancel = async (tableId: string) => {
     setCancelFor(null)
     setSessions((p) => { const n = { ...p }; delete n[tableId]; return n })
@@ -767,6 +968,20 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       customerName: s.customerName,
       customerId: s.customerId || null,
     }).catch(() => {})
+
+    // Frame mode: create per-player khata entries for credit
+    if (s.mode === 'frames' && method === 'credit') {
+      const ft = frameTotals(s)
+      const pIds = s.playerIds || []
+      for (let i = 0; i < ft.owed.length; i++) {
+        const pid = pIds[i]
+        if (ft.owed[i] > 0 && pid) {
+          await api.post(`/khata/${pid}`, {
+            type: 'gave', amount: ft.owed[i], note: `Frames on ${t.name}`,
+          }).catch(() => {})
+        }
+      }
+    }
     refreshBills(); refreshCanteen()
   }
 
@@ -827,6 +1042,17 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       </header>
 
       <main className="mx-auto max-w-content px-4 py-5 sm:px-6">
+        {/* Alarm banner */}
+        {activeAlarm && (
+          <AlarmBanner
+            tableName={activeAlarm.tableName}
+            message={activeAlarm.message}
+            isExpired={activeAlarm.isExpired}
+            onExtend={(min) => extendSession(activeAlarm.tableId, min)}
+            onDismiss={() => setActiveAlarm(null)}
+          />
+        )}
+
         {/* ── Tables ── */}
         {tab === 'tables' && (
           <>
@@ -841,7 +1067,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                 if (!s) return (
                   <div key={t.id} className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
                     <div className="flex items-center justify-between">
-                      <span className="font-display text-[0.95rem] font-bold text-white">{t.name}</span>
+                      <span className="font-display text-[0.95rem] font-bold text-white">{tableEmoji(t.id)} {t.name}</span>
                       <span className="text-[0.65rem] uppercase tracking-wider text-white/30">Open</span>
                     </div>
                     <div className="mt-1 text-[0.7rem] text-white/35">₹{t.frame}/frame · ₹{t.hour}/hr</div>
@@ -853,32 +1079,43 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                 const amt = sessAmount(t, s, now)
                 const ft = frameTotals(s)
                 const multiPlayer = (s.players?.length || 2) > 2
+                // Remaining time for fixed-duration sessions
+                const elapsedMin = (now - s.startTime) / 60000
+                const remainMin = s.selectedDuration ? s.selectedDuration - elapsedMin : null
+                const isOvertime = remainMin !== null && remainMin < 0
+                const isAlarm = activeAlarm?.tableId === t.id
 
                 return (
-                  <div key={t.id} className="gold-border rounded-2xl bg-gold/[0.04] p-4">
+                  <div key={t.id} className={`rounded-2xl p-4 transition-all ${isAlarm ? 'gold-border animate-pulse bg-gold/[0.06]' : 'gold-border bg-gold/[0.04]'}`}>
                     <div className="flex items-center justify-between">
-                      <span className="font-display text-[0.95rem] font-bold text-white">{t.name}</span>
+                      <span className="font-display text-[0.95rem] font-bold text-white">{tableEmoji(t.id)} {t.name}</span>
                       <span className="rounded bg-red/15 px-2 py-0.5 text-[0.6rem] font-bold uppercase text-red-light">{s.mode}</span>
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-[0.72rem] text-white/45">
                       <span>{s.customerName || 'Walk-in'}</span>
-                      {s.selectedDuration && <span className="rounded bg-gold/20 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold">{s.selectedDuration >= 60 ? `${s.selectedDuration / 60}hr` : `${s.selectedDuration}min`}</span>}
+                      {s.selectedDuration && (
+                        <span className={`rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase ${isOvertime ? 'bg-red-light/20 text-red-light' : 'bg-gold/20 text-gold'}`}>
+                          {isOvertime ? `+${Math.ceil(-remainMin!)}m over` : `${Math.ceil(remainMin!)}m left`}
+                        </span>
+                      )}
                     </div>
 
                     {s.mode === 'timer' ? (
                       <div className="mt-2 flex items-end justify-between">
-                        <span className="font-display text-xl font-bold tabular-nums text-white">{fmtDuration(now - s.startTime)}</span>
+                        <span className={`font-display text-xl font-bold tabular-nums ${isOvertime ? 'text-red-light' : 'text-white'}`}>{fmtDuration(now - s.startTime)}</span>
                         <span className="font-display text-lg font-bold text-gold">{rupee(amt)}</span>
                       </div>
                     ) : (
                       <div className="mt-2">
-                        {/* Multi-player: show all players + owed */}
                         {multiPlayer ? (
                           <>
                             <div className="mb-2 space-y-1">
                               {s.players.map((p, i) => (
                                 <div key={i} className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-1.5">
-                                  <span className="text-[0.78rem] text-white/80">{p || `P${i + 1}`}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[0.78rem] text-white/80">{p || `P${i + 1}`}</span>
+                                    {(s.playerIds || [])[i] && <span className="text-[0.55rem] text-gold">🔗</span>}
+                                  </div>
                                   <span className={`font-display text-[0.78rem] font-bold ${ft.owed[i] > 0 ? 'text-red-light' : 'text-white/30'}`}>{ft.owed[i] > 0 ? `owes ${rupee(ft.owed[i])}` : 'clear'}</span>
                                 </div>
                               ))}
@@ -900,7 +1137,10 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                               {[0, 1].map((i) => (
                                 <button key={i} onClick={() => recordFrame(t.id, i, i === 0 ? 1 : 0)} className="flex-1 rounded-lg border border-white/12 bg-white/5 py-2 text-[0.72rem] font-bold text-white hover:border-gold">
                                   <Trophy size={12} className="mx-auto mb-0.5 text-gold" />
-                                  {s.players[i] || `P${i + 1}`}
+                                  <div className="flex items-center justify-center gap-1">
+                                    {s.players[i] || `P${i + 1}`}
+                                    {(s.playerIds || [])[i] && <span className="text-[0.55rem] text-gold">🔗</span>}
+                                  </div>
                                   <div className="text-[0.62rem] text-white/45">owes {rupee(ft.owed[i])}</div>
                                 </button>
                               ))}
@@ -926,7 +1166,20 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                         {canteen.map((c) => <option key={c._id} value={c._id}>{c.name} ₹{c.price}</option>)}
                       </select>
                     </div>
-                    {(s.cart || []).length > 0 && <div className="mt-1.5 text-[0.66rem] text-white/40">{(s.cart || []).map((c) => `${c.name}×${c.qty}`).join(', ')}</div>}
+
+                    {/* Cart with remove buttons */}
+                    {(s.cart || []).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {(s.cart || []).map((c) => (
+                          <span key={c.itemId} className="flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-0.5 text-[0.62rem] text-white/55">
+                            {c.name}×{c.qty}
+                            <button onClick={() => removeFromCart(t.id, c.itemId)} className="ml-0.5 text-white/30 hover:text-red-light transition-colors">
+                              <X size={9} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <button onClick={() => setCancelFor(t)} className="mt-1.5 w-full text-[0.62rem] uppercase tracking-wider text-white/25 hover:text-red-light">Cancel session</button>
                   </div>
                 )
@@ -964,7 +1217,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
         {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} />}
         {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
         {tab === 'khata' && <KhataTab />}
-        {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} onShowReport={() => setShowReport(true)} />}
+        {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} onShowReport={() => setShowReport(true)} />}
       </main>
 
       {startFor && <StartModal table={startFor} customers={customers} onStart={(o) => start(startFor, o)} onClose={() => setStartFor(null)} />}
@@ -972,7 +1225,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {frameFor && sessions[frameFor] && <FrameModal session={sessions[frameFor]} onRecord={(w, l) => recordFrame(frameFor, w, l)} onClose={() => setFrameFor(null)} />}
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
       {addBill && <AddBillModal canteen={canteen} customers={customers.map(c => c.name)} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
-      {showReport && <ShiftReportModal bills={bills} onClose={() => setShowReport(false)} />}
+      {showReport && <ShiftReportModal canteen={canteen} onClose={() => setShowReport(false)} />}
     </div>
   )
 }
@@ -1032,7 +1285,7 @@ function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }
 }
 
 // ── Admin Finance tab ──
-function FinanceTab({ khata, todayBills, onShowReport }: { khata: any[]; todayBills: Bill[]; onShowReport: () => void }) {
+function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]; todayBills: Bill[]; canteen: Item[]; onShowReport: () => void }) {
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [payment, setPayment] = useState('all')
   const [bills, setBills] = useState<Bill[]>([])
   const [statPeriod, setStatPeriod] = useState<'today' | '7days' | '30days'>('today')
@@ -1048,7 +1301,6 @@ function FinanceTab({ khata, todayBills, onShowReport }: { khata: any[]; todayBi
       const { data } = await api.get('/stats', { params: { period: statPeriod } })
       setTableStats(data.topStations || [])
     } catch {
-      // Fallback: compute from todayBills
       const map: Record<string, { revenue: number; count: number }> = {}
       todayBills.filter(b => b.mode !== 'canteen').forEach(b => {
         if (!map[b.tableName]) map[b.tableName] = { revenue: 0, count: 0 }
@@ -1074,7 +1326,6 @@ function FinanceTab({ khata, todayBills, onShowReport }: { khata: any[]; todayBi
 
   return (
     <div>
-      {/* Today's Galla */}
       <div className="mb-5 rounded-2xl border border-gold/20 bg-gold/[0.04] p-5">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-gold">Today's Galla</h3>
@@ -1099,7 +1350,6 @@ function FinanceTab({ khata, todayBills, onShowReport }: { khata: any[]; todayBi
         )}
       </div>
 
-      {/* Table Stats */}
       <div className="mb-5 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2"><TrendingUp size={15} className="text-gold" /><h3 className="font-display text-[0.72rem] font-bold uppercase tracking-wider text-white/70">Table Performance</h3></div>

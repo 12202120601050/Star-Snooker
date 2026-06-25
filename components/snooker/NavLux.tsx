@@ -35,8 +35,8 @@ export function NavLux() {
     <header
       className={`fixed inset-x-0 top-0 z-[100] transition-all duration-500 ${
         scrolled || open
-          ? 'border-b border-white/[0.06] bg-ink/90 backdrop-blur-2xl'
-          : 'bg-transparent'
+          ? 'border-b border-white/[0.06] bg-ink/92 backdrop-blur-2xl'
+          : 'bg-gradient-to-b from-ink/70 to-transparent backdrop-blur-sm'
       }`}
     >
       <nav
