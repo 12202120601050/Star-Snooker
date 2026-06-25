@@ -7,6 +7,7 @@ import {
   LogOut, Play, Square, Trophy, X, Plus as PlusIcon, FileText,
   Minus, ChevronDown, ChevronUp, AlertTriangle, TrendingUp, Wallet,
   CheckCircle, Clock, Bell, Link as LinkIcon, Pencil, Trash2,
+  User as UserIcon, KeyRound,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
@@ -135,6 +136,89 @@ function AlarmBanner({ tableName, message, isExpired, onExtend, onDismiss }: {
         <button onClick={() => onExtend(30)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+30m</button>
         <button onClick={() => onExtend(60)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+1hr</button>
         <button onClick={onDismiss} className="rounded-lg border border-white/15 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-white/50">OK</button>
+      </div>
+    </div>
+  )
+}
+
+// ── Profile modal ──
+function ProfileModal({ user, onClose }: { user: any; onClose: () => void }) {
+  const [view, setView] = useState<'info' | 'changePin'>('info')
+  const [curr, setCurr] = useState('')
+  const [next, setNext] = useState('')
+  const [conf, setConf] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const changePin = async () => {
+    if (!curr || !next || !conf) return setMsg({ ok: false, text: 'All fields required' })
+    if (next !== conf) return setMsg({ ok: false, text: 'New PINs do not match' })
+    if (next.length < 4) return setMsg({ ok: false, text: 'PIN must be at least 4 digits' })
+    setBusy(true); setMsg(null)
+    try {
+      await api.post('/auth/change-pin', { currentPassword: curr, newPassword: next })
+      setMsg({ ok: true, text: 'PIN changed! Use new PIN next time you log in.' })
+      setCurr(''); setNext(''); setConf('')
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.response?.data?.message || 'Failed to change PIN' })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-xs rounded-2xl border border-white/12 bg-ink-2 p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-white">My Profile</h3>
+          <button onClick={onClose}><X size={16} className="text-white/40" /></button>
+        </div>
+
+        {/* tab row */}
+        <div className="mb-4 flex gap-1.5">
+          <button onClick={() => setView('info')} className={`flex-1 rounded-lg py-1.5 font-display text-[0.68rem] font-bold uppercase ${view === 'info' ? 'bg-gold text-ink' : 'border border-white/15 text-white/50'}`}>
+            <UserIcon size={11} className="mr-1 inline" />Info
+          </button>
+          <button onClick={() => setView('changePin')} className={`flex-1 rounded-lg py-1.5 font-display text-[0.68rem] font-bold uppercase ${view === 'changePin' ? 'bg-gold text-ink' : 'border border-white/15 text-white/50'}`}>
+            <KeyRound size={11} className="mr-1 inline" />Change PIN
+          </button>
+        </div>
+
+        {view === 'info' && (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+              <div className="text-[0.58rem] uppercase tracking-wider text-white/35">Name</div>
+              <div className="mt-0.5 font-semibold text-white">{user?.name || '—'}</div>
+            </div>
+            <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+              <div className="text-[0.58rem] uppercase tracking-wider text-white/35">Phone Number</div>
+              <div className="mt-0.5 font-semibold text-white">{user?.phone || '—'}</div>
+            </div>
+            <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+              <div className="text-[0.58rem] uppercase tracking-wider text-white/35">Role</div>
+              <div className="mt-0.5 font-semibold capitalize text-gold">{user?.role || '—'}</div>
+            </div>
+          </div>
+        )}
+
+        {view === 'changePin' && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-[0.6rem] uppercase tracking-wider text-white/40">Current PIN</label>
+              <input type="password" value={curr} onChange={(e) => setCurr(e.target.value)} placeholder="••••" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-center tracking-[0.25em] text-white outline-none focus:border-gold" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[0.6rem] uppercase tracking-wider text-white/40">New PIN</label>
+              <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="••••" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-center tracking-[0.25em] text-white outline-none focus:border-gold" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[0.6rem] uppercase tracking-wider text-white/40">Confirm New PIN</label>
+              <input type="password" value={conf} onChange={(e) => setConf(e.target.value)} placeholder="••••" onKeyDown={(e) => e.key === 'Enter' && changePin()} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-center tracking-[0.25em] text-white outline-none focus:border-gold" />
+            </div>
+            {msg && <p className={`text-[0.72rem] ${msg.ok ? 'text-green-400' : 'text-red-light'}`}>{msg.text}</p>}
+            <button onClick={changePin} disabled={busy} className="w-full rounded-lg bg-gold py-2.5 font-display text-[0.72rem] font-bold uppercase text-ink disabled:opacity-50">
+              {busy ? 'Changing…' : 'Change PIN'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1274,6 +1358,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [showReport, setShowReport] = useState(false)
   const [pinGate, setPinGate] = useState<{ onVerified: () => void } | null>(null)
   const [editBill, setEditBill] = useState<Bill | null>(null)
+  const [showProfile, setShowProfile] = useState(false)
   const polling = useRef(false)
 
   // Alarm state
@@ -1498,6 +1583,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                 <div className="text-[0.5rem] uppercase tracking-wider text-white/40">Counter</div>
               </div>
             )}
+            <button onClick={() => setShowProfile(true)} aria-label="My profile" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/12 text-white/60 hover:border-gold hover:text-gold"><UserIcon size={16} /></button>
             <button onClick={doLogout} aria-label="Log out" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/12 text-white/60 hover:border-red"><LogOut size={16} /></button>
           </div>
         </div>
@@ -1717,6 +1803,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {showReport && <ShiftReportModal canteen={canteen} onClose={() => setShowReport(false)} />}
       {pinGate && <PinGateModal onVerified={pinGate.onVerified} onClose={() => setPinGate(null)} />}
       {editBill && <EditBillModal bill={editBill} onSaved={refreshBills} onClose={() => setEditBill(null)} />}
+      {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
     </div>
   )
 }

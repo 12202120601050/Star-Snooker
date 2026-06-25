@@ -52,9 +52,11 @@ export const useAuth = create<AuthState>((set) => ({
 
   loginCustomer: async (phone, pin) => {
     const { data } = await api.post('/customers/login', { phone, pin })
-    const { token, user } = normalize(data)
-    persist(token, { ...user, role: 'customer' })
-    set({ token, user: { ...user, role: 'customer' } })
+    const token = data.token
+    const raw = data.customer ?? data.user ?? data
+    const user: User = { name: raw.name, phone: raw.phone, role: 'customer', id: raw._id ?? raw.id }
+    persist(token, user)
+    set({ token, user })
     return user
   },
 

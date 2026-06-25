@@ -170,7 +170,7 @@ const verifyPin = async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ message: 'Password required' });
-    const user = await User.findById(req.user._id);
+    const user = await User.findOne({ phone: req.user.phone });
     if (!user) return res.status(404).json({ message: 'User not found' });
     const ok = await user.comparePassword(password);
     if (!ok) return res.status(401).json({ message: 'Wrong PIN' });
@@ -180,4 +180,22 @@ const verifyPin = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin };
+// POST /api/auth/change-pin — change password (requires current password)
+const changePin = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ message: 'Both current and new PIN required' });
+    if (newPassword.length < 4) return res.status(400).json({ message: 'New PIN must be at least 4 digits' });
+    const user = await User.findOne({ phone: req.user.phone });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const ok = await user.comparePassword(currentPassword);
+    if (!ok) return res.status(401).json({ message: 'Current PIN is wrong' });
+    user.password = newPassword;
+    await user.save();
+    res.json({ ok: true, message: 'PIN changed successfully' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to change PIN' });
+  }
+};
+
+module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin };
