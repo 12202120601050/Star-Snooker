@@ -205,7 +205,7 @@ export function ManageProvider({ children }: { children: ReactNode }) {
       mutate((d) => {
         const s = d.sessions[t.id]
         if (!s) return d
-        const play = s.mode === 'timer' ? timerAmount(t.hour ?? 0, Date.now() - s.startedAt) : framesTotals(s).total
+        const play = s.mode === 'timer' ? timerAmount(t.hour ?? 0, t.frame ?? 0, Date.now() - s.startedAt) : framesTotals(s).total
         const canteen = cartTotal(s.cart)
         for (const line of s.cart) {
           const it = d.canteen.find((c) => c.id === line.itemId)

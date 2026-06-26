@@ -91,7 +91,7 @@ function TableCard({ t }: { t: TableConfig }) {
   }
 
   // ── Active table ──
-  const play = s.mode === 'timer' ? timerAmount(t.hour ?? 0, now - s.startedAt) : framesTotals(s).total
+  const play = s.mode === 'timer' ? timerAmount(t.hour ?? 0, t.frame ?? 0, now - s.startedAt) : framesTotals(s).total
   const ft = s.mode === 'frames' ? framesTotals(s) : null
 
   return (

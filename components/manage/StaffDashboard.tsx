@@ -65,10 +65,11 @@ const frameTotals = (s: ApiSession) => {
 
 const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
   if (s.mode === 'frames') return frameTotals(s).total
-  // hourRate field now stores the per-30-min (frame) rate, not per-hour
-  const rate = s.hourRate || t.frame || 0
-  if (s.selectedDuration) return Math.round(rate * (s.selectedDuration / 30))
-  return timerAmount(rate, now - s.startTime)
+  const hr = s.hourRate || t.hour || 0     // per-hour rate
+  const fr = s.frameCharge || t.frame || 0 // per-30-min rate (minimum charge)
+  if (s.selectedDuration === 30) return fr  // exactly 30 min → frame price
+  if (s.selectedDuration) return Math.round(hr * (s.selectedDuration / 60))
+  return timerAmount(hr, fr, now - s.startTime)
 }
 
 const tableEmoji = (id: string) => {
@@ -502,12 +503,14 @@ function StartModal({ table, customers, onStart, onClose }: {
   const [custId, setCustId] = useState<string | null>(null)
   const [players, setPlayers] = useState<string[]>(['', ''])
   const [playerIds, setPlayerIds] = useState<string[]>(['', ''])
-  const [rate, setRate] = useState(table.frame ?? 0) // per-frame = per-30-min
+  const [frameRate, setFrameRate] = useState(table.frame ?? 0) // per-30-min / per-frame
+  const [hourRate, setHourRate] = useState(table.hour ?? 0)   // per-60-min (timer only)
   const [durationMin, setDurationMin] = useState(0)
   const [forgot, setForgot] = useState(false)
   const [agoMin, setAgoMin] = useState('0')
 
-  const fixedAmount = durationMin > 0 ? Math.round(rate * (durationMin / 30)) : null
+  // 30 min → frame price; longer → hourly rate prorated
+  const fixedAmount = durationMin === 30 ? frameRate : durationMin > 0 ? Math.round(hourRate * (durationMin / 60)) : null
 
   const setPlayer = (i: number, name: string, id: string) => {
     setPlayers(prev => prev.map((p, j) => j === i ? name : p))
@@ -540,9 +543,19 @@ function StartModal({ table, customers, onStart, onClose }: {
           ))}
         </div>
 
-        {/* Rate — same for both modes (per frame = per 30 min) */}
-        <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate per frame / 30 min</label>
-        <input type="number" value={rate} onChange={(e) => setRate(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+        {/* Rates */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Per frame / 30 min</label>
+            <input type="number" value={frameRate} onChange={(e) => setFrameRate(Number(e.target.value))} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+          </div>
+          {mode === 'timer' && (
+            <div>
+              <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Per hour</label>
+              <input type="number" value={hourRate} onChange={(e) => setHourRate(Number(e.target.value))} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+            </div>
+          )}
+        </div>
 
         {/* Duration (timer only) */}
         {mode === 'timer' && (
@@ -557,7 +570,9 @@ function StartModal({ table, customers, onStart, onClose }: {
             </div>
             {fixedAmount !== null && (
               <div className="mt-2 flex items-center justify-between rounded-lg bg-gold/[0.08] px-3 py-2">
-                <span className="text-[0.72rem] text-white/50">Fixed charge ({durationMin / 30} frame{durationMin > 30 ? 's' : ''})</span>
+                <span className="text-[0.72rem] text-white/50">
+                  {durationMin === 30 ? '30 min (frame rate)' : `${durationMin} min (hourly rate)`}
+                </span>
                 <span className="font-display font-bold text-gold">₹{fixedAmount}</span>
               </div>
             )}
@@ -641,7 +656,7 @@ function StartModal({ table, customers, onStart, onClose }: {
         <button
           onClick={() => onStart({
             mode, customerName: cust, customerId: custId,
-            hourRate: rate, frameCharge: rate, // both use same per-frame/30-min rate
+            hourRate, frameCharge: frameRate,
             players, playerIds,
             startTime: Date.now() - Number(agoMin || 0) * 60000,
             selectedDuration: durationMin > 0 ? durationMin : undefined,

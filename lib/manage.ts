@@ -115,11 +115,11 @@ export function fmtDuration(ms: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
-// Timer bill — uses the per-30-min (frame) rate. Minimum 1 slot (30 min), then
-// prorated per minute beyond that in 30-min units.
-export function timerAmount(halfHourRate: number, ms: number): number {
-  const slots = Math.max(1, ms / 1_800_000) // minimum 1 × 30-min slot
-  return Math.round(slots * halfHourRate)
+// Timer bill — prorated at hourly rate, minimum = frame (30-min) price.
+// e.g. Pool: frame=80, hour=150 → 30min=₹80, 1hr=₹150, 45min=₹113
+export function timerAmount(hourRate: number, frameRate: number, ms: number): number {
+  const byHour = Math.round(hourRate * ms / 3_600_000)
+  return Math.max(frameRate, byHour)
 }
 
 // Loser-pays: each frame, the loser owes the frame charge. Returns per-player
