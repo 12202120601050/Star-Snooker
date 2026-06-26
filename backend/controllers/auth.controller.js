@@ -198,4 +198,44 @@ const changePin = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin };
+// POST /api/auth/staff — admin creates a staff account (no OTP needed)
+const createStaff = async (req, res) => {
+  try {
+    const { name, phone, password } = req.body;
+    if (!name || !phone || !password) return res.status(400).json({ message: 'Name, phone and PIN are required' });
+    const exists = await User.findOne({ phone });
+    if (exists) {
+      if (exists.isActive && exists.role === 'staff') return res.status(400).json({ message: 'Staff with this phone already exists' });
+      // Re-activate or promote
+      exists.name = name; exists.password = password; exists.role = 'staff'; exists.isVerified = true; exists.isActive = true;
+      await exists.save();
+      return res.json({ message: 'Staff account updated', user: { _id: exists._id, name, phone, role: 'staff' } });
+    }
+    const user = await User.create({ name, phone, password, role: 'staff', isVerified: true, isActive: true });
+    res.status(201).json({ message: 'Staff created', user: { _id: user._id, name, phone, role: 'staff' } });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to create staff' });
+  }
+};
+
+// GET /api/auth/staff — list all staff accounts (admin only)
+const getStaff = async (req, res) => {
+  try {
+    const staff = await User.find({ role: 'staff' }).select('-password -otp').sort({ name: 1 });
+    res.json(staff);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch staff' });
+  }
+};
+
+// DELETE /api/auth/staff/:id — deactivate staff (admin only)
+const deactivateStaff = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.params.id, { isActive: false });
+    res.json({ message: 'Staff deactivated' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to deactivate staff' });
+  }
+};
+
+module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin, createStaff, getStaff, deactivateStaff };

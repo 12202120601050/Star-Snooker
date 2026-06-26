@@ -65,6 +65,7 @@ exports.getBills = async (req, res) => {
     if (customer && customer !== 'all') {
       query.customerName = customer === 'walkin' ? 'Walk-in' : customer;
     }
+    query.isDeleted = { $ne: true };
     const bills = await Bill.find(query).sort({ createdAt: -1 }).limit(Math.min(Number(limit) || 100, 500));
     res.json(bills);
   } catch {
@@ -86,10 +87,10 @@ exports.updateBill = async (req, res) => {
   }
 };
 
-// DELETE /api/bills/:id
+// DELETE /api/bills/:id — soft delete
 exports.deleteBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndDelete(req.params.id);
+    const bill = await Bill.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
     res.json({ message: 'Bill deleted' });
   } catch (err) {
@@ -101,8 +102,39 @@ exports.deleteBill = async (req, res) => {
 exports.getTodayBills = async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    res.json(await Bill.find({ date: today }).sort({ createdAt: -1 }));
+    res.json(await Bill.find({ date: today, isDeleted: { $ne: true } }).sort({ createdAt: -1 }));
   } catch {
     res.status(500).json({ message: 'Failed to fetch today bills' });
+  }
+};
+
+// GET /api/bills/deleted — today's soft-deleted bills (admin only)
+exports.getDeletedBills = async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const bills = await Bill.find({ date: today, isDeleted: true }).sort({ createdAt: -1 }).limit(50);
+    res.json(bills);
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch deleted bills' });
+  }
+};
+
+// PUT /api/bills/:id/restore — restore soft-deleted bill (admin only)
+exports.restoreBill = async (req, res) => {
+  try {
+    await Bill.findByIdAndUpdate(req.params.id, { isDeleted: false });
+    res.json({ message: 'Bill restored' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to restore bill' });
+  }
+};
+
+// DELETE /api/bills/:id/permanent — hard delete (admin only)
+exports.permanentDeleteBill = async (req, res) => {
+  try {
+    await Bill.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Bill permanently deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to permanently delete bill' });
   }
 };

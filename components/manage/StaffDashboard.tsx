@@ -2361,61 +2361,146 @@ function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }
   )
 }
 
-// ── Admin History tab — deleted customers (restore / permanently delete) ──
+// ── Admin History tab — deleted items + staff management ──
 function HistoryTab() {
-  const [deleted, setDeleted] = useState<Array<{ _id: string; name: string; phone?: string; updatedAt?: string }>>([])
+  type DelCust = { _id: string; name: string; phone?: string; updatedAt?: string }
+  type DelItem = { _id: string; name: string; price: number; stock: number; updatedAt?: string }
+  type DelBill = { _id: string; tableName: string; total: number; paymentMethod: string; customerName?: string; createdAt: string }
+  type StaffUser = { _id: string; name: string; phone: string; isActive: boolean }
+
+  const [section, setSection] = useState<'customers' | 'canteen' | 'bills' | 'staff'>('customers')
+  const [customers, setCustomers] = useState<DelCust[]>([])
+  const [canteen, setCanteen] = useState<DelItem[]>([])
+  const [bills, setBills] = useState<DelBill[]>([])
+  const [staff, setStaff] = useState<StaffUser[]>([])
   const [busy, setBusy] = useState<string | null>(null)
 
-  const load = async () => {
-    try { const { data } = await api.get('/customers/deleted'); setDeleted(data || []) } catch {}
-  }
-  useEffect(() => { load() }, [])
+  // Staff creation form
+  const [stName, setStName] = useState(''); const [stPhone, setStPhone] = useState(''); const [stPin, setStPin] = useState(''); const [stBusy, setStBusy] = useState(false); const [stMsg, setStMsg] = useState('')
 
-  const restore = async (id: string) => {
-    setBusy(id)
-    try { await api.put(`/customers/${id}/restore`); await load() } catch {}
-    setBusy(null)
+  const load = async () => {
+    if (section === 'customers') { try { const { data } = await api.get('/customers/deleted'); setCustomers(data || []) } catch {} }
+    if (section === 'canteen')   { try { const { data } = await api.get('/canteen/deleted'); setCanteen(data || []) } catch {} }
+    if (section === 'bills')     { try { const { data } = await api.get('/bills/deleted'); setBills(data || []) } catch {} }
+    if (section === 'staff')     { try { const { data } = await api.get('/auth/staff'); setStaff(data || []) } catch {} }
   }
-  const permanent = async (id: string, name: string) => {
-    if (!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return
-    setBusy(id)
-    try { await api.delete(`/customers/${id}/permanent`); await load() } catch {}
-    setBusy(null)
+  useEffect(() => { load() }, [section])
+
+  const act = async (fn: () => Promise<void>, id: string) => { setBusy(id); try { await fn(); await load() } catch {} setBusy(null) }
+
+  const createStaff = async () => {
+    if (!stName || !stPhone || !stPin) { setStMsg('All fields required'); return }
+    setStBusy(true); setStMsg('')
+    try {
+      await api.post('/auth/staff', { name: stName, phone: stPhone, password: stPin })
+      setStName(''); setStPhone(''); setStPin(''); setStMsg('✓ Staff created')
+      await load()
+    } catch (e: any) { setStMsg(e?.response?.data?.message || 'Failed') }
+    setStBusy(false)
   }
+
+  const sections: Array<{ id: typeof section; label: string }> = [
+    { id: 'customers', label: 'Customers' }, { id: 'canteen', label: 'Canteen Items' },
+    { id: 'bills', label: "Today's Bills" }, { id: 'staff', label: 'Staff' },
+  ]
+
+  const RestoreRow = ({ id, label, sub, onRestore, onPermanent }: { id: string; label: string; sub?: string; onRestore: () => void; onPermanent: () => void }) => (
+    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+      <div>
+        <div className="font-semibold text-white/80">{label}</div>
+        {sub && <div className="text-[0.62rem] text-white/35">{sub}</div>}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onRestore} disabled={busy === id} className="rounded-lg border border-green-400/40 bg-green-400/10 px-3 py-1.5 text-[0.68rem] font-bold text-green-400 disabled:opacity-40">{busy === id ? '…' : 'Restore'}</button>
+        <button onClick={onPermanent} disabled={busy === id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-3 py-1.5 text-[0.68rem] font-bold text-red-light disabled:opacity-40">{busy === id ? '…' : '🗑 Forever'}</button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="mx-auto max-w-content px-4 py-6 sm:px-6">
-      <h2 className="mb-1 font-display text-lg font-bold text-white">Deleted Customers</h2>
-      <p className="mb-4 text-[0.72rem] text-white/40">Last 30 soft-deleted profiles. Restore to re-activate or permanently remove.</p>
-      {deleted.length === 0 ? (
-        <div className="rounded-xl border border-white/8 bg-white/[0.02] p-6 text-center text-[0.78rem] text-white/30">No deleted customers</div>
-      ) : (
+      <h2 className="mb-4 font-display text-lg font-bold text-white">History & Staff</h2>
+      {/* Section tabs */}
+      <div className="mb-4 flex gap-2 overflow-x-auto">
+        {sections.map((s) => (
+          <button key={s.id} onClick={() => setSection(s.id)} className={`whitespace-nowrap rounded-lg px-3 py-1.5 font-display text-[0.68rem] font-bold uppercase tracking-wider ${section === s.id ? 'bg-gold text-ink' : 'border border-white/12 text-white/50'}`}>{s.label}</button>
+        ))}
+      </div>
+
+      {/* Deleted customers */}
+      {section === 'customers' && (
         <div className="space-y-2">
-          {deleted.map((c) => (
-            <div key={c._id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
-              <div>
-                <div className="font-semibold text-white/80">{c.name}</div>
-                {c.phone && <div className="text-[0.65rem] text-white/35">{c.phone}</div>}
-                {c.updatedAt && <div className="text-[0.6rem] text-white/25">Deleted {new Date(c.updatedAt).toLocaleDateString('en-IN')}</div>}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => restore(c._id)}
-                  disabled={busy === c._id}
-                  className="rounded-lg border border-green-400/40 bg-green-400/10 px-3 py-1.5 text-[0.68rem] font-bold text-green-400 disabled:opacity-40"
-                >
-                  {busy === c._id ? '…' : 'Restore'}
-                </button>
-                <button
-                  onClick={() => permanent(c._id, c.name)}
-                  disabled={busy === c._id}
-                  className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-3 py-1.5 text-[0.68rem] font-bold text-red-light disabled:opacity-40"
-                >
-                  {busy === c._id ? '…' : 'Delete Forever'}
-                </button>
-              </div>
-            </div>
+          {customers.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No deleted customers</div>}
+          {customers.map((c) => (
+            <RestoreRow key={c._id} id={c._id} label={c.name} sub={[c.phone, c.updatedAt && `Deleted ${new Date(c.updatedAt).toLocaleDateString('en-IN')}`].filter(Boolean).join(' · ')}
+              onRestore={() => act(() => api.put(`/customers/${c._id}/restore`), c._id)}
+              onPermanent={() => { if (confirm(`Permanently delete "${c.name}"?`)) act(() => api.delete(`/customers/${c._id}/permanent`), c._id) }}
+            />
           ))}
+        </div>
+      )}
+
+      {/* Deleted canteen items */}
+      {section === 'canteen' && (
+        <div className="space-y-2">
+          {canteen.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No deleted canteen items</div>}
+          {canteen.map((c) => (
+            <RestoreRow key={c._id} id={c._id} label={c.name} sub={`₹${c.price} · Stock ${c.stock}`}
+              onRestore={() => act(() => api.put(`/canteen/${c._id}/restore`), c._id)}
+              onPermanent={() => { if (confirm(`Permanently delete "${c.name}"?`)) act(() => api.delete(`/canteen/${c._id}/permanent`), c._id) }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Deleted bills (today) */}
+      {section === 'bills' && (
+        <div className="space-y-2">
+          {bills.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No deleted bills today</div>}
+          {bills.map((b) => (
+            <RestoreRow key={b._id} id={b._id} label={`${b.tableName} · ₹${b.total}`}
+              sub={[b.customerName && b.customerName !== 'Walk-in' ? b.customerName : null, b.paymentMethod.toUpperCase(), new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })].filter(Boolean).join(' · ')}
+              onRestore={() => act(() => api.put(`/bills/${b._id}/restore`), b._id)}
+              onPermanent={() => { if (confirm(`Permanently delete this bill?`)) act(() => api.delete(`/bills/${b._id}/permanent`), b._id) }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Staff management */}
+      {section === 'staff' && (
+        <div>
+          {/* Create staff form */}
+          <div className="mb-4 rounded-xl border border-gold/20 bg-gold/[0.04] p-4">
+            <div className="mb-3 font-display text-[0.72rem] font-bold uppercase tracking-wider text-gold">Add Staff</div>
+            <div className="space-y-2">
+              <input value={stName} onChange={(e) => setStName(e.target.value)} placeholder="Name" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+              <input value={stPhone} onChange={(e) => setStPhone(e.target.value)} placeholder="Phone (10 digits)" type="tel" inputMode="numeric" maxLength={10} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+              <input value={stPin} onChange={(e) => setStPin(e.target.value)} placeholder="PIN (4+ digits)" type="password" inputMode="numeric" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+              {stMsg && <p className={`text-[0.68rem] ${stMsg.startsWith('✓') ? 'text-green-400' : 'text-red-light'}`}>{stMsg}</p>}
+              <button onClick={createStaff} disabled={stBusy} className="w-full rounded-lg bg-gold py-2 font-display text-[0.72rem] font-bold uppercase text-ink disabled:opacity-40">{stBusy ? 'Creating…' : '✓ Add Staff'}</button>
+            </div>
+          </div>
+          {/* Staff list */}
+          <div className="space-y-2">
+            {staff.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No staff accounts</div>}
+            {staff.map((s) => (
+              <div key={s._id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white/80">{s.name}</span>
+                    {!s.isActive && <span className="rounded-full bg-red-light/20 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase text-red-light">Inactive</span>}
+                  </div>
+                  <div className="text-[0.62rem] text-white/35">{s.phone}</div>
+                </div>
+                {s.isActive && (
+                  <button onClick={() => { if (confirm(`Deactivate ${s.name}?`)) act(() => api.delete(`/auth/staff/${s._id}`), s._id) }} disabled={busy === s._id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-3 py-1.5 text-[0.68rem] font-bold text-red-light disabled:opacity-40">
+                    {busy === s._id ? '…' : 'Deactivate'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

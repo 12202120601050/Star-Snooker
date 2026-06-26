@@ -20,6 +20,12 @@ exports.seed = async (req, res) => {
       await User.create({ name: 'Staff', phone: '9106005507', password: '1234', role: 'staff', isVerified: true, isActive: true });
       result.staff = 'created (9106005507 / 1234)';
     }
+    if (!(await User.findOne({ phone: '9574211208' }))) {
+      await User.create({ name: 'Rahul', phone: '9574211208', password: '1208', role: 'staff', isVerified: true, isActive: true });
+      result.rahul = 'created (Rahul / 9574211208 / 1208)';
+    } else {
+      result.rahul = 'exists';
+    }
     if ((await CanteenItem.countDocuments()) === 0) {
       await CanteenItem.insertMany([
         { name: 'Cold Drink', price: 25, stock: 0, order: 1 },

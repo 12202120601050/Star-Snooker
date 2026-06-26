@@ -30,6 +30,7 @@ const billSchema = new mongoose.Schema({
   note:          { type: String, default: '' },
   createdBy:     { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   date:          { type: String }, // YYYY-MM-DD for daily filtering
+  isDeleted:     { type: Boolean, default: false },
 }, { timestamps: true });
 
 billSchema.pre('save', function (next) {
