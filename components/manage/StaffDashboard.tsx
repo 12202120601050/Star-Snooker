@@ -40,6 +40,8 @@ type Bill = {
   timeIn?: string; timeOut?: string
   canteenItems?: Array<{ itemId: string; name: string; qty: number; price: number }>
 }
+type Expense = { _id: string; amount: number; note?: string; createdAt: string }
+
 type KhataCustomer = {
   _id: string; name: string; phone?: string; balance: number
   loyaltyPoints?: number; outstandingBalance?: number
@@ -136,6 +138,57 @@ function AlarmBanner({ tableName, message, isExpired, onExtend, onDismiss }: {
         <button onClick={() => onExtend(30)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+30m</button>
         <button onClick={() => onExtend(60)} className="rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-gold">+1hr</button>
         <button onClick={onDismiss} className="rounded-lg border border-white/15 px-2.5 py-1.5 font-display text-[0.65rem] font-bold uppercase text-white/50">OK</button>
+      </div>
+    </div>
+  )
+}
+
+// ── Add Expense modal ──
+function AddExpenseModal({ onSaved, onClose }: { onSaved: () => void; onClose: () => void }) {
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    if (!amount || Number(amount) <= 0) return
+    setBusy(true)
+    try {
+      await api.post('/expenses', { amount: Number(amount), note })
+      onSaved(); onClose()
+    } catch { setBusy(false) }
+  }
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-xs rounded-2xl border border-red-light/20 bg-ink-2 p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-red-light">Counter Expense</h3>
+            <p className="text-[0.65rem] text-white/35">Cash taken from counter</p>
+          </div>
+          <button onClick={onClose}><X size={16} className="text-white/40" /></button>
+        </div>
+        <div className="mb-3">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Amount (₹)</label>
+          <input
+            type="number" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)}
+            placeholder="0" min={1}
+            className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl font-bold text-white outline-none focus:border-red-light"
+          />
+        </div>
+        <div className="mb-5">
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Description</label>
+          <input
+            value={note} onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && save()}
+            placeholder="e.g. Petrol, Tea, Supplies…"
+            className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-red-light"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+          <button onClick={save} disabled={busy || !amount} className="flex-1 rounded-lg bg-red py-2.5 font-display text-[0.7rem] font-bold uppercase text-white disabled:opacity-50">
+            {busy ? 'Saving…' : 'Record Expense'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1359,6 +1412,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [pinGate, setPinGate] = useState<{ onVerified: () => void } | null>(null)
   const [editBill, setEditBill] = useState<Bill | null>(null)
   const [showProfile, setShowProfile] = useState(false)
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [addExpense, setAddExpense] = useState(false)
   const polling = useRef(false)
 
   // Alarm state
@@ -1405,9 +1460,10 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   }
   const refreshBills = async () => { try { const { data } = await api.get('/bills/today'); setBills(data) } catch {} }
   const refreshCanteen = async () => { try { const { data } = await api.get('/canteen'); setCanteen(data) } catch {} }
+  const refreshExpenses = async () => { try { const { data } = await api.get('/expenses'); setExpenses(data) } catch {} }
 
   useEffect(() => {
-    refreshTables(); refreshBills(); refreshCanteen()
+    refreshTables(); refreshBills(); refreshCanteen(); refreshExpenses()
     api.get('/khata').then((r) => setKhata(r.data || [])).catch(() => {})
     const t = setInterval(() => {
       setNow(Date.now())
@@ -1546,8 +1602,9 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     const cash = bills.reduce((a, b) => b.paymentMethod === 'cash' ? a + b.total : b.paymentMethod === 'split' ? a + (b.cashAmount || 0) : a, 0)
     const upi = bills.reduce((a, b) => b.paymentMethod === 'upi' ? a + b.total : b.paymentMethod === 'split' ? a + (b.upiAmount || 0) : a, 0)
     const total = bills.reduce((a, b) => a + b.total, 0)
-    return { cash, upi, total }
-  }, [bills])
+    const exp = expenses.reduce((a, e) => a + e.amount, 0)
+    return { cash, upi, total, exp, netCash: cash - exp }
+  }, [bills, expenses])
 
   const tabs = [
     { id: 'tables', label: 'Tables', icon: LayoutGrid },
@@ -1572,7 +1629,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
           <div className="flex items-center gap-3">
             {admin && (
               <>
-                <div className="hidden text-right sm:block"><div className="font-display text-sm font-bold text-green-400">{rupee(galla.cash)}</div><div className="text-[0.5rem] uppercase tracking-wider text-white/40">Cash</div></div>
+                <div className="hidden text-right sm:block"><div className={`font-display text-sm font-bold ${galla.netCash < 0 ? 'text-red-light' : 'text-green-400'}`}>{rupee(galla.netCash)}</div><div className="text-[0.5rem] uppercase tracking-wider text-white/40">Net Cash</div></div>
                 <div className="hidden text-right sm:block"><div className="font-display text-sm font-bold" style={{ color: '#23c2ff' }}>{rupee(galla.upi)}</div><div className="text-[0.5rem] uppercase tracking-wider text-white/40">UPI</div></div>
                 <div className="text-right"><div className="font-display text-base font-bold text-gold">{rupee(galla.total)}</div><div className="text-[0.5rem] uppercase tracking-wider text-white/40">Galla</div></div>
               </>
@@ -1745,6 +1802,15 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 
         {/* ── Bills ── */}
         {tab === 'bills' && (
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">{bills.length} bills today</span>
+              </div>
+              <button onClick={() => setAddExpense(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-light/30 bg-red-light/8 px-3 py-2 font-display text-[0.72rem] font-bold uppercase text-red-light hover:bg-red-light/15">
+                <Minus size={13} /> Expense
+              </button>
+            </div>
           <div className="space-y-2">
             {bills.length === 0
               ? <p className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-8 text-center text-[0.85rem] text-white/35">No bills today.</p>
@@ -1787,12 +1853,39 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                 </div>
               ))}
           </div>
+
+            {/* Expenses section */}
+            {expenses.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-2 flex items-center justify-between border-t border-red-light/15 pt-4">
+                  <span className="text-[0.62rem] uppercase tracking-wider text-red-light/60">Counter Expenses</span>
+                  <span className="font-display text-[0.82rem] font-bold text-red-light">−{rupee(expenses.reduce((a, e) => a + e.amount, 0))}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {expenses.map((e) => (
+                    <div key={e._id} className="flex items-center justify-between rounded-lg border border-red-light/10 bg-red-light/[0.03] px-4 py-2.5">
+                      <div>
+                        <span className="text-[0.82rem] text-white/70">{e.note || 'Expense'}</span>
+                        <div className="text-[0.62rem] text-white/30">{new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-display text-[0.85rem] font-bold text-red-light">{rupee(e.amount)}</span>
+                        {admin && (
+                          <button onClick={() => api.delete(`/expenses/${e._id}`).then(refreshExpenses).catch(() => {})} className="rounded p-1 text-white/15 hover:text-red-light transition-colors"><Trash2 size={11} /></button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} />}
         {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
         {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
-        {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} onShowReport={() => setShowReport(true)} />}
+        {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} expenses={expenses} onShowReport={() => setShowReport(true)} />}
       </main>
 
       {startFor && <StartModal table={startFor} customers={customers} onStart={(o) => start(startFor, o)} onClose={() => setStartFor(null)} />}
@@ -1804,6 +1897,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {pinGate && <PinGateModal onVerified={pinGate.onVerified} onClose={() => setPinGate(null)} />}
       {editBill && <EditBillModal bill={editBill} onSaved={refreshBills} onClose={() => setEditBill(null)} />}
       {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
+      {addExpense && <AddExpenseModal onSaved={refreshExpenses} onClose={() => setAddExpense(false)} />}
     </div>
   )
 }
@@ -1863,7 +1957,7 @@ function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }
 }
 
 // ── Admin Finance tab ──
-function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]; todayBills: Bill[]; canteen: Item[]; onShowReport: () => void }) {
+function FinanceTab({ khata, todayBills, canteen, expenses, onShowReport }: { khata: any[]; todayBills: Bill[]; canteen: Item[]; expenses: Expense[]; onShowReport: () => void }) {
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [payment, setPayment] = useState('all')
   const [bills, setBills] = useState<Bill[]>([])
   const [statPeriod, setStatPeriod] = useState<'today' | '7days' | '30days'>('today')
@@ -1901,6 +1995,8 @@ function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]
   const upi = bills.reduce((a, b) => b.paymentMethod === 'upi' ? a + b.total : b.paymentMethod === 'split' ? a + (b.upiAmount || 0) : a, 0)
   const outstanding = khata.reduce((a, k) => a + Math.max(0, k.balance || k.outstandingBalance || 0), 0)
   const maxTableRev = tableStats[0]?.revenue || 1
+  const todayExp = expenses.reduce((a, e) => a + e.amount, 0)
+  const netCash = todayCash - todayExp
 
   return (
     <div>
@@ -1924,6 +2020,40 @@ function FinanceTab({ khata, todayBills, canteen, onShowReport }: { khata: any[]
             <div className="bg-green-400" style={{ width: `${(todayCash / todayTotal) * 100}%` }} />
             <div style={{ width: `${(todayUpi / todayTotal) * 100}%`, background: '#23c2ff' }} />
             <div className="bg-red-light" style={{ width: `${(todayCredit / todayTotal) * 100}%` }} />
+          </div>
+        )}
+      </div>
+
+      {/* Galla Cash Position */}
+      <div className="mb-5 rounded-2xl border border-green-500/20 bg-green-500/[0.03] p-4">
+        <h3 className="mb-3 font-display text-[0.72rem] font-bold uppercase tracking-widest text-green-400">💵 Counter Cash Position</h3>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2">
+            <span className="text-[0.78rem] text-white/60">Cash received (today)</span>
+            <span className="font-display font-bold text-green-400">{rupee(todayCash)}</span>
+          </div>
+          {todayExp > 0 && (
+            <div className="flex items-center justify-between rounded-lg bg-red-light/[0.04] px-3 py-2">
+              <span className="text-[0.78rem] text-white/60">Counter expenses</span>
+              <span className="font-display font-bold text-red-light">−{rupee(todayExp)}</span>
+            </div>
+          )}
+          <div className={`flex items-center justify-between rounded-lg px-3 py-2.5 ${netCash < 0 ? 'bg-red-light/10 border border-red-light/20' : 'bg-green-500/10 border border-green-500/20'}`}>
+            <span className="font-display text-[0.72rem] font-bold uppercase tracking-wider text-white/70">Net Cash in Counter</span>
+            <span className={`font-display text-lg font-bold ${netCash < 0 ? 'text-red-light' : 'text-green-400'}`}>{rupee(netCash)}</span>
+          </div>
+        </div>
+        {expenses.length > 0 && (
+          <div className="mt-3 border-t border-white/8 pt-3">
+            <div className="text-[0.6rem] uppercase tracking-wider text-white/30 mb-2">Today's Expenses</div>
+            <div className="space-y-1.5">
+              {expenses.map((e) => (
+                <div key={e._id} className="flex items-center justify-between text-[0.78rem]">
+                  <span className="text-white/50">{e.note || 'Expense'} <span className="text-white/25 text-[0.62rem]">{new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></span>
+                  <span className="text-red-light">{rupee(e.amount)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
