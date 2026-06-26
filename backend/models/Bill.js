@@ -21,8 +21,10 @@ const billSchema = new mongoose.Schema({
   discount:      { type: Number, default: 0 },
   total:         { type: Number, required: true },
   paymentMethod: { type: String, enum: ['cash', 'upi', 'split', 'credit'], required: true },
-  splitCash:     { type: Number, default: 0 },
-  splitUpi:      { type: Number, default: 0 },
+  splitCash:     { type: Number, default: 0 }, // legacy — use cashAmount/upiAmount
+  splitUpi:      { type: Number, default: 0 }, // legacy
+  cashAmount:    { type: Number, default: 0 }, // cash portion (split or full cash)
+  upiAmount:     { type: Number, default: 0 }, // upi portion (split or full upi)
   customerName:  { type: String, default: 'Walk-in' },
   customerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   note:          { type: String, default: '' },

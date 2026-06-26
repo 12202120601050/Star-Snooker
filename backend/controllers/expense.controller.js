@@ -1,11 +1,16 @@
 const Expense = require('../models/Expense');
 
-// POST /api/expenses
+// POST /api/expenses  body: { amount, note, type: 'out'|'in' }
 exports.createExpense = async (req, res) => {
   try {
-    const { amount, note } = req.body;
+    const { amount, note, type } = req.body;
     if (!amount || Number(amount) <= 0) return res.status(400).json({ message: 'Amount must be positive' });
-    const expense = await Expense.create({ amount: Number(amount), note: note || '', createdBy: req.user._id });
+    const expense = await Expense.create({
+      amount: Number(amount),
+      note: note || '',
+      type: type === 'in' ? 'in' : 'out',
+      createdBy: req.user._id,
+    });
     res.status(201).json(expense);
   } catch (err) {
     res.status(500).json({ message: 'Failed to record expense' });

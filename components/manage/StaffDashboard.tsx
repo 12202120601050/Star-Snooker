@@ -40,7 +40,7 @@ type Bill = {
   timeIn?: string; timeOut?: string
   canteenItems?: Array<{ itemId: string; name: string; qty: number; price: number }>
 }
-type Expense = { _id: string; amount: number; note?: string; createdAt: string }
+type Expense = { _id: string; amount: number; note?: string; type: 'in' | 'out'; createdAt: string }
 
 type KhataCustomer = {
   _id: string; name: string; phone?: string; balance: number
@@ -143,26 +143,29 @@ function AlarmBanner({ tableName, message, isExpired, onExtend, onDismiss }: {
   )
 }
 
-// ── Add Expense modal ──
-function AddExpenseModal({ onSaved, onClose }: { onSaved: () => void; onClose: () => void }) {
+// ── Add Expense / Cash-In modal ──
+function AddExpenseModal({ type, onSaved, onClose }: { type: 'in' | 'out'; onSaved: () => void; onClose: () => void }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const isIn = type === 'in'
   const save = async () => {
     if (!amount || Number(amount) <= 0) return
     setBusy(true)
     try {
-      await api.post('/expenses', { amount: Number(amount), note })
+      await api.post('/expenses', { amount: Number(amount), note, type })
       onSaved(); onClose()
     } catch { setBusy(false) }
   }
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-xs rounded-2xl border border-red-light/20 bg-ink-2 p-5 shadow-2xl">
+      <div className={`w-full max-w-xs rounded-2xl border bg-ink-2 p-5 shadow-2xl ${isIn ? 'border-green-500/20' : 'border-red-light/20'}`}>
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-red-light">Counter Expense</h3>
-            <p className="text-[0.65rem] text-white/35">Cash taken from counter</p>
+            <h3 className={`font-display text-[0.75rem] font-bold uppercase tracking-widest ${isIn ? 'text-green-400' : 'text-red-light'}`}>
+              {isIn ? '💵 Add Cash to Counter' : 'Counter Expense'}
+            </h3>
+            <p className="text-[0.65rem] text-white/35">{isIn ? 'Cash being added to the till' : 'Cash taken from counter'}</p>
           </div>
           <button onClick={onClose}><X size={16} className="text-white/40" /></button>
         </div>
@@ -171,22 +174,22 @@ function AddExpenseModal({ onSaved, onClose }: { onSaved: () => void; onClose: (
           <input
             type="number" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)}
             placeholder="0" min={1}
-            className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl font-bold text-white outline-none focus:border-red-light"
+            className={`w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl font-bold text-white outline-none ${isIn ? 'focus:border-green-500' : 'focus:border-red-light'}`}
           />
         </div>
         <div className="mb-5">
-          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Description</label>
+          <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Note</label>
           <input
             value={note} onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && save()}
-            placeholder="e.g. Petrol, Tea, Supplies…"
-            className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-red-light"
+            placeholder={isIn ? 'e.g. Morning float, Cash from owner…' : 'e.g. Petrol, Tea, Supplies…'}
+            className={`w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none ${isIn ? 'focus:border-green-500' : 'focus:border-red-light'}`}
           />
         </div>
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
-          <button onClick={save} disabled={busy || !amount} className="flex-1 rounded-lg bg-red py-2.5 font-display text-[0.7rem] font-bold uppercase text-white disabled:opacity-50">
-            {busy ? 'Saving…' : 'Record Expense'}
+          <button onClick={save} disabled={busy || !amount} className={`flex-1 rounded-lg py-2.5 font-display text-[0.7rem] font-bold uppercase text-white disabled:opacity-50 ${isIn ? 'bg-green-600' : 'bg-red'}`}>
+            {busy ? 'Saving…' : isIn ? 'Add Cash' : 'Record Expense'}
           </button>
         </div>
       </div>
@@ -1414,6 +1417,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [showProfile, setShowProfile] = useState(false)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [addExpense, setAddExpense] = useState(false)
+  const [addCashIn, setAddCashIn] = useState(false)
   const polling = useRef(false)
 
   // Alarm state
@@ -1602,8 +1606,9 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     const cash = bills.reduce((a, b) => b.paymentMethod === 'cash' ? a + b.total : b.paymentMethod === 'split' ? a + (b.cashAmount || 0) : a, 0)
     const upi = bills.reduce((a, b) => b.paymentMethod === 'upi' ? a + b.total : b.paymentMethod === 'split' ? a + (b.upiAmount || 0) : a, 0)
     const total = bills.reduce((a, b) => a + b.total, 0)
-    const exp = expenses.reduce((a, e) => a + e.amount, 0)
-    return { cash, upi, total, exp, netCash: cash - exp }
+    const exp = expenses.filter(e => e.type === 'out').reduce((a, e) => a + e.amount, 0)
+    const cashIn = expenses.filter(e => e.type === 'in').reduce((a, e) => a + e.amount, 0)
+    return { cash, upi, total, exp, cashIn, netCash: cash + cashIn - exp }
   }, [bills, expenses])
 
   const tabs = [
@@ -1807,9 +1812,16 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
               <div className="flex items-center gap-2">
                 <span className="font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">{bills.length} bills today</span>
               </div>
-              <button onClick={() => setAddExpense(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-light/30 bg-red-light/8 px-3 py-2 font-display text-[0.72rem] font-bold uppercase text-red-light hover:bg-red-light/15">
-                <Minus size={13} /> Expense
-              </button>
+              <div className="flex gap-2">
+                {admin && (
+                  <button onClick={() => setAddCashIn(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-green-500/30 bg-green-500/8 px-3 py-2 font-display text-[0.72rem] font-bold uppercase text-green-400 hover:bg-green-500/15">
+                    <PlusIcon size={13} /> Cash In
+                  </button>
+                )}
+                <button onClick={() => setAddExpense(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-light/30 bg-red-light/8 px-3 py-2 font-display text-[0.72rem] font-bold uppercase text-red-light hover:bg-red-light/15">
+                  <Minus size={13} /> Expense
+                </button>
+              </div>
             </div>
           <div className="space-y-2">
             {bills.length === 0
@@ -1854,15 +1866,38 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
               ))}
           </div>
 
-            {/* Expenses section */}
-            {expenses.length > 0 && (
+            {/* Cash In entries */}
+            {expenses.filter(e => e.type === 'in').length > 0 && (
               <div className="mt-5">
-                <div className="mb-2 flex items-center justify-between border-t border-red-light/15 pt-4">
-                  <span className="text-[0.62rem] uppercase tracking-wider text-red-light/60">Counter Expenses</span>
-                  <span className="font-display text-[0.82rem] font-bold text-red-light">−{rupee(expenses.reduce((a, e) => a + e.amount, 0))}</span>
+                <div className="mb-2 flex items-center justify-between border-t border-green-500/15 pt-4">
+                  <span className="text-[0.62rem] uppercase tracking-wider text-green-400/70">Cash Added to Counter</span>
+                  <span className="font-display text-[0.82rem] font-bold text-green-400">+{rupee(expenses.filter(e => e.type === 'in').reduce((a, e) => a + e.amount, 0))}</span>
                 </div>
                 <div className="space-y-1.5">
-                  {expenses.map((e) => (
+                  {expenses.filter(e => e.type === 'in').map((e) => (
+                    <div key={e._id} className="flex items-center justify-between rounded-lg border border-green-500/10 bg-green-500/[0.03] px-4 py-2.5">
+                      <div>
+                        <span className="text-[0.82rem] text-white/70">{e.note || 'Cash added'}</span>
+                        <div className="text-[0.62rem] text-white/30">{new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-display text-[0.85rem] font-bold text-green-400">{rupee(e.amount)}</span>
+                        {admin && <button onClick={() => api.delete(`/expenses/${e._id}`).then(refreshExpenses).catch(() => {})} className="rounded p-1 text-white/15 hover:text-red-light transition-colors"><Trash2 size={11} /></button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Expenses section */}
+            {expenses.filter(e => e.type === 'out').length > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 flex items-center justify-between border-t border-red-light/15 pt-4">
+                  <span className="text-[0.62rem] uppercase tracking-wider text-red-light/60">Counter Expenses</span>
+                  <span className="font-display text-[0.82rem] font-bold text-red-light">−{rupee(expenses.filter(e => e.type === 'out').reduce((a, e) => a + e.amount, 0))}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {expenses.filter(e => e.type === 'out').map((e) => (
                     <div key={e._id} className="flex items-center justify-between rounded-lg border border-red-light/10 bg-red-light/[0.03] px-4 py-2.5">
                       <div>
                         <span className="text-[0.82rem] text-white/70">{e.note || 'Expense'}</span>
@@ -1870,9 +1905,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="font-display text-[0.85rem] font-bold text-red-light">{rupee(e.amount)}</span>
-                        {admin && (
-                          <button onClick={() => api.delete(`/expenses/${e._id}`).then(refreshExpenses).catch(() => {})} className="rounded p-1 text-white/15 hover:text-red-light transition-colors"><Trash2 size={11} /></button>
-                        )}
+                        {admin && <button onClick={() => api.delete(`/expenses/${e._id}`).then(refreshExpenses).catch(() => {})} className="rounded p-1 text-white/15 hover:text-red-light transition-colors"><Trash2 size={11} /></button>}
                       </div>
                     </div>
                   ))}
@@ -1897,7 +1930,8 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {pinGate && <PinGateModal onVerified={pinGate.onVerified} onClose={() => setPinGate(null)} />}
       {editBill && <EditBillModal bill={editBill} onSaved={refreshBills} onClose={() => setEditBill(null)} />}
       {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
-      {addExpense && <AddExpenseModal onSaved={refreshExpenses} onClose={() => setAddExpense(false)} />}
+      {addExpense && <AddExpenseModal type="out" onSaved={refreshExpenses} onClose={() => setAddExpense(false)} />}
+      {addCashIn && <AddExpenseModal type="in" onSaved={refreshExpenses} onClose={() => setAddCashIn(false)} />}
     </div>
   )
 }
@@ -1995,8 +2029,9 @@ function FinanceTab({ khata, todayBills, canteen, expenses, onShowReport }: { kh
   const upi = bills.reduce((a, b) => b.paymentMethod === 'upi' ? a + b.total : b.paymentMethod === 'split' ? a + (b.upiAmount || 0) : a, 0)
   const outstanding = khata.reduce((a, k) => a + Math.max(0, k.balance || k.outstandingBalance || 0), 0)
   const maxTableRev = tableStats[0]?.revenue || 1
-  const todayExp = expenses.reduce((a, e) => a + e.amount, 0)
-  const netCash = todayCash - todayExp
+  const todayExp = expenses.filter(e => e.type === 'out').reduce((a, e) => a + e.amount, 0)
+  const todayCashIn = expenses.filter(e => e.type === 'in').reduce((a, e) => a + e.amount, 0)
+  const netCash = todayCash + todayCashIn - todayExp
 
   return (
     <div>
@@ -2029,9 +2064,15 @@ function FinanceTab({ khata, todayBills, canteen, expenses, onShowReport }: { kh
         <h3 className="mb-3 font-display text-[0.72rem] font-bold uppercase tracking-widest text-green-400">💵 Counter Cash Position</h3>
         <div className="space-y-2">
           <div className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2">
-            <span className="text-[0.78rem] text-white/60">Cash received (today)</span>
+            <span className="text-[0.78rem] text-white/60">Cash from billing</span>
             <span className="font-display font-bold text-green-400">{rupee(todayCash)}</span>
           </div>
+          {todayCashIn > 0 && (
+            <div className="flex items-center justify-between rounded-lg bg-green-500/[0.04] px-3 py-2">
+              <span className="text-[0.78rem] text-white/60">Cash added to counter</span>
+              <span className="font-display font-bold text-green-400">+{rupee(todayCashIn)}</span>
+            </div>
+          )}
           {todayExp > 0 && (
             <div className="flex items-center justify-between rounded-lg bg-red-light/[0.04] px-3 py-2">
               <span className="text-[0.78rem] text-white/60">Counter expenses</span>
@@ -2044,16 +2085,18 @@ function FinanceTab({ khata, todayBills, canteen, expenses, onShowReport }: { kh
           </div>
         </div>
         {expenses.length > 0 && (
-          <div className="mt-3 border-t border-white/8 pt-3">
-            <div className="text-[0.6rem] uppercase tracking-wider text-white/30 mb-2">Today's Expenses</div>
-            <div className="space-y-1.5">
-              {expenses.map((e) => (
-                <div key={e._id} className="flex items-center justify-between text-[0.78rem]">
-                  <span className="text-white/50">{e.note || 'Expense'} <span className="text-white/25 text-[0.62rem]">{new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></span>
-                  <span className="text-red-light">{rupee(e.amount)}</span>
-                </div>
-              ))}
-            </div>
+          <div className="mt-3 border-t border-white/8 pt-3 space-y-1">
+            <div className="text-[0.6rem] uppercase tracking-wider text-white/30 mb-2">Today's Ledger</div>
+            {expenses.map((e) => (
+              <div key={e._id} className="flex items-center justify-between text-[0.78rem]">
+                <span className="text-white/50">
+                  <span className={`mr-1 text-[0.6rem] font-bold ${e.type === 'in' ? 'text-green-400' : 'text-red-light'}`}>{e.type === 'in' ? '▲' : '▼'}</span>
+                  {e.note || (e.type === 'in' ? 'Cash added' : 'Expense')}
+                  <span className="ml-1.5 text-white/25 text-[0.62rem]">{new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                </span>
+                <span className={e.type === 'in' ? 'text-green-400' : 'text-red-light'}>{e.type === 'in' ? '+' : '−'}{rupee(e.amount)}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
