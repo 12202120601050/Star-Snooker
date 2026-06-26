@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   LayoutGrid, Receipt, Coffee, ClipboardCheck, BarChart3, BookUser,
@@ -1412,7 +1412,9 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [cancelFor, setCancelFor] = useState<TableConfig | null>(null)
   const [addBill, setAddBill] = useState(false)
   const [showReport, setShowReport] = useState(false)
-  const [pinGate, setPinGate] = useState<{ onVerified: () => void } | null>(null)
+  const pinActionRef = useRef<(() => void) | null>(null)
+  const [showPinGate, setShowPinGate] = useState(false)
+  const requirePin = useCallback((action: () => void) => { pinActionRef.current = action; setShowPinGate(true) }, [])
   const [editBill, setEditBill] = useState<Bill | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -1845,13 +1847,13 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                       {admin && (
                         <>
                           <button
-                            onClick={() => setPinGate({ onVerified: () => { setPinGate(null); setEditBill(b) } })}
-                            className="rounded p-1 text-white/20 hover:text-gold transition-colors" title="Edit bill"
-                          ><Pencil size={12} /></button>
+                            onClick={() => requirePin(() => setEditBill(b))}
+                            className="rounded p-1.5 text-white/30 hover:text-gold transition-colors" title="Edit bill"
+                          ><Pencil size={13} /></button>
                           <button
-                            onClick={() => setPinGate({ onVerified: () => { setPinGate(null); api.delete(`/bills/${b._id}`).then(refreshBills).catch(() => {}) } })}
-                            className="rounded p-1 text-white/20 hover:text-red-light transition-colors" title="Delete bill"
-                          ><Trash2 size={12} /></button>
+                            onClick={() => requirePin(() => api.delete(`/bills/${b._id}`).then(refreshBills).catch(() => {}))}
+                            className="rounded p-1.5 text-white/30 hover:text-red-light transition-colors" title="Delete bill"
+                          ><Trash2 size={13} /></button>
                         </>
                       )}
                     </div>
@@ -1915,7 +1917,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
           </div>
         )}
 
-        {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} />}
+        {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} isAdmin={admin} requirePin={requirePin} />}
         {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
         {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
         {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} expenses={expenses} onShowReport={() => setShowReport(true)} />}
@@ -1927,7 +1929,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {cancelFor && sessions[cancelFor.id] && <CancelModal table={cancelFor} session={sessions[cancelFor.id]} now={now} onConfirm={() => cancel(cancelFor.id)} onClose={() => setCancelFor(null)} />}
       {addBill && <AddBillModal canteen={canteen} customers={customers} onAdd={saveManualBill} onClose={() => setAddBill(false)} />}
       {showReport && <ShiftReportModal canteen={canteen} onClose={() => setShowReport(false)} />}
-      {pinGate && <PinGateModal onVerified={pinGate.onVerified} onClose={() => setPinGate(null)} />}
+      {showPinGate && <PinGateModal onVerified={() => { setShowPinGate(false); pinActionRef.current?.(); pinActionRef.current = null }} onClose={() => { setShowPinGate(false); pinActionRef.current = null }} />}
       {editBill && <EditBillModal bill={editBill} onSaved={refreshBills} onClose={() => setEditBill(null)} />}
       {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
       {addExpense && <AddExpenseModal type="out" onSaved={refreshExpenses} onClose={() => setAddExpense(false)} />}
@@ -1937,32 +1939,137 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
 }
 
 // ── Canteen tab ──
-function CanteenTab({ canteen, onChange }: { canteen: Item[]; onChange: () => void }) {
-  const [name, setName] = useState(''); const [price, setPrice] = useState(''); const [stock, setStock] = useState('')
-  const add = async () => { if (!name || !price) return; await api.post('/canteen', { name, price: Number(price), stock: Number(stock) || 0 }).catch(() => {}); setName(''); setPrice(''); setStock(''); onChange() }
-  const adjust = async (i: Item, delta: number) => { await api.put(`/canteen/${i._id}`, { stock: Math.max(0, i.stock + delta) }).catch(() => {}); onChange() }
+function CanteenTab({ canteen, onChange, isAdmin, requirePin }: {
+  canteen: Item[]; onChange: () => void; isAdmin: boolean; requirePin: (action: () => void) => void
+}) {
+  const [name, setName] = useState(''); const [price, setPrice] = useState(''); const [initStock, setInitStock] = useState('')
+  const [restockFor, setRestockFor] = useState<Item | null>(null)
+  const [restockQty, setRestockQty] = useState('')
+  const [restockConfirmed, setRestockConfirmed] = useState(false)
+  const [setStockFor, setSetStockFor] = useState<Item | null>(null)
+  const [setStockVal, setSetStockVal] = useState('')
+
+  const add = async () => {
+    if (!name || !price) return
+    await api.post('/canteen', { name, price: Number(price), stock: Number(initStock) || 0 }).catch(() => {})
+    setName(''); setPrice(''); setInitStock(''); onChange()
+  }
+  const adjust = async (i: Item, delta: number) => {
+    await api.put(`/canteen/${i._id}`, { stock: Math.max(0, i.stock + delta) }).catch(() => {})
+    onChange()
+  }
   const remove = async (i: Item) => { await api.delete(`/canteen/${i._id}`).catch(() => {}); onChange() }
+  const doRestock = async () => {
+    if (!restockFor || !restockQty || Number(restockQty) <= 0) return
+    await api.put(`/canteen/${restockFor._id}`, { stock: restockFor.stock + Number(restockQty) }).catch(() => {})
+    setRestockFor(null); setRestockQty(''); setRestockConfirmed(false); onChange()
+  }
+  const doSetStock = async () => {
+    if (!setStockFor || setStockVal === '' || Number(setStockVal) < 0) return
+    await api.put(`/canteen/${setStockFor._id}`, { stock: Number(setStockVal) }).catch(() => {})
+    setSetStockFor(null); setSetStockVal(''); onChange()
+  }
+
   return (
     <div>
+      {/* Add new item row */}
       <div className="mb-4 grid grid-cols-[1fr_auto_auto_auto] gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New item" className="rounded-lg border border-white/15 bg-ink-2 px-3 py-2 text-sm text-white" />
         <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" placeholder="₹" className="w-20 rounded-lg border border-white/15 bg-ink-2 px-3 py-2 text-sm text-white" />
-        <input value={stock} onChange={(e) => setStock(e.target.value)} type="number" placeholder="qty" className="w-20 rounded-lg border border-white/15 bg-ink-2 px-3 py-2 text-sm text-white" />
+        <input value={initStock} onChange={(e) => setInitStock(e.target.value)} type="number" placeholder="qty" className="w-20 rounded-lg border border-white/15 bg-ink-2 px-3 py-2 text-sm text-white" />
         <button onClick={add} className="rounded-lg bg-gold px-3 font-display text-[0.72rem] font-bold uppercase text-ink">Add</button>
       </div>
+
       <div className="space-y-2">
         {canteen.map((i) => (
-          <div key={i._id} className="flex items-center justify-between rounded-lg border border-white/8 bg-white/[0.02] px-4 py-2.5">
-            <div><span className="text-[0.9rem] text-white">{i.name}</span> <span className="text-[0.75rem] text-gold">₹{i.price}</span></div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => adjust(i, -1)} className="h-7 w-7 rounded border border-white/12 text-white/60">−</button>
-              <span className="w-10 text-center font-display font-bold tabular-nums text-white">{i.stock}</span>
-              <button onClick={() => adjust(i, 1)} className="h-7 w-7 rounded border border-white/12 text-white/60">+</button>
-              <button onClick={() => remove(i)} className="ml-1 h-7 w-7 rounded border border-white/8 text-white/20 hover:border-red-light/40 hover:text-red-light"><X size={12} /></button>
+          <div key={i._id} className="rounded-lg border border-white/8 bg-white/[0.02] px-4 py-2.5">
+            <div className="flex items-center justify-between">
+              <div><span className="text-[0.9rem] text-white">{i.name}</span> <span className="text-[0.75rem] text-gold">₹{i.price}</span></div>
+              <div className="flex items-center gap-2">
+                {/* ±1 quick adjust (all staff) */}
+                <button onClick={() => adjust(i, -1)} className="h-8 w-8 rounded border border-white/12 text-white/60 hover:border-white/30 hover:text-white">−</button>
+                <span className="w-10 text-center font-display font-bold tabular-nums text-white">{i.stock}</span>
+                <button onClick={() => adjust(i, 1)} className="h-8 w-8 rounded border border-white/12 text-white/60 hover:border-white/30 hover:text-white">+</button>
+                {/* Admin-only */}
+                {isAdmin && (
+                  <>
+                    <button
+                      onClick={() => { setRestockFor(i); setRestockQty(''); setRestockConfirmed(false) }}
+                      className="ml-1 rounded border border-green-500/25 bg-green-500/8 px-2 py-1 font-display text-[0.6rem] font-bold uppercase text-green-400 hover:bg-green-500/18 transition-colors"
+                      title="Fast restock"
+                    >Restock</button>
+                    <button
+                      onClick={() => { setSetStockFor(i); setSetStockVal(String(i.stock)) }}
+                      className="rounded border border-white/12 p-1.5 text-white/30 hover:text-gold transition-colors"
+                      title="Manually set stock"
+                    ><Pencil size={12} /></button>
+                    <button
+                      onClick={() => requirePin(() => remove(i))}
+                      className="rounded border border-white/8 p-1.5 text-white/20 hover:border-red-light/40 hover:text-red-light transition-colors"
+                      title="Delete item"
+                    ><Trash2 size={12} /></button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Restock modal */}
+      {restockFor && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && (setRestockFor(null), setRestockConfirmed(false))}>
+          <div className="w-full max-w-xs rounded-2xl border border-green-500/20 bg-ink-2 p-5 shadow-2xl">
+            <h3 className="mb-0.5 font-display text-[0.75rem] font-bold uppercase tracking-widest text-green-400">Restock — {restockFor.name}</h3>
+            <p className="mb-3 text-[0.65rem] text-white/35">Current stock: {restockFor.stock} units</p>
+            <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Quantity to add</label>
+            <input
+              type="number" autoFocus value={restockQty} onChange={(e) => { setRestockQty(e.target.value); setRestockConfirmed(false) }}
+              placeholder="e.g. 24" min={1}
+              className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl font-bold text-white outline-none focus:border-green-500"
+            />
+            {restockQty && Number(restockQty) > 0 && (
+              <div className={`mb-3 flex items-start gap-2 rounded-lg border p-3 text-[0.72rem] ${restockConfirmed ? 'border-green-500/30 bg-green-500/8 text-green-300' : 'border-gold/25 bg-gold/6 text-gold/80'}`}>
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                {restockConfirmed
+                  ? `Stock will become ${restockFor.stock + Number(restockQty)} units. Click Add Stock to confirm.`
+                  : `This adds ${restockQty} units. New total: ${restockFor.stock + Number(restockQty)}. Tap Confirm.`}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => { setRestockFor(null); setRestockConfirmed(false) }} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+              {!restockConfirmed
+                ? <button onClick={() => setRestockConfirmed(true)} disabled={!restockQty || Number(restockQty) <= 0} className="flex-1 rounded-lg bg-gold py-2.5 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-40">Confirm</button>
+                : <button onClick={doRestock} className="flex-1 rounded-lg bg-green-600 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white">Add Stock</button>
+              }
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual set stock modal */}
+      {setStockFor && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && setSetStockFor(null)}>
+          <div className="w-full max-w-xs rounded-2xl border border-gold/20 bg-ink-2 p-5 shadow-2xl">
+            <h3 className="mb-0.5 font-display text-[0.75rem] font-bold uppercase tracking-widest text-gold">Edit Stock — {setStockFor.name}</h3>
+            <p className="mb-3 text-[0.65rem] text-white/35">Current: {setStockFor.stock} units</p>
+            <label className="mb-1.5 block text-[0.6rem] uppercase tracking-wider text-white/40">Set stock to</label>
+            <input
+              type="number" autoFocus value={setStockVal} onChange={(e) => setSetStockVal(e.target.value)}
+              min={0}
+              className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-center text-xl font-bold text-white outline-none focus:border-gold"
+            />
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-gold/20 bg-gold/6 p-3 text-[0.7rem] text-gold/80">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>Manually setting stock overwrites the system count. Use only to correct errors, not for routine adjustments.</span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setSetStockFor(null)} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+              <button onClick={doSetStock} disabled={setStockVal === '' || Number(setStockVal) < 0} className="flex-1 rounded-lg bg-gold py-2.5 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-40">Set Stock</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
