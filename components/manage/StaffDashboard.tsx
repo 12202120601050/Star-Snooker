@@ -65,8 +65,9 @@ const frameTotals = (s: ApiSession) => {
 
 const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
   if (s.mode === 'frames') return frameTotals(s).total
-  const rate = s.hourRate || t.hour || 0
-  if (s.selectedDuration) return Math.round(rate * (s.selectedDuration / 60))
+  // hourRate field now stores the per-30-min (frame) rate, not per-hour
+  const rate = s.hourRate || t.frame || 0
+  if (s.selectedDuration) return Math.round(rate * (s.selectedDuration / 30))
   return timerAmount(rate, now - s.startTime)
 }
 
@@ -394,13 +395,13 @@ function StartModal({ table, customers, onStart, onClose }: {
   const [players, setPlayers] = useState(['Player 1', 'Player 2'])
   const [playerIds, setPlayerIds] = useState<string[]>(['', ''])
   const [playerPicker, setPlayerPicker] = useState<number | null>(null)
-  const [hourRate, setHourRate] = useState(table.hour ?? 0)
+  const [hourRate, setHourRate] = useState(table.frame ?? 0) // per-30-min rate
   const [frameCharge, setFrameCharge] = useState(table.frame ?? 0)
   const [durationMin, setDurationMin] = useState(0)
   const [forgot, setForgot] = useState(false)
   const [agoMin, setAgoMin] = useState('0')
 
-  const fixedAmount = durationMin > 0 ? Math.round(hourRate * (durationMin / 60)) : null
+  const fixedAmount = durationMin > 0 ? Math.round(hourRate * (durationMin / 30)) : null
 
   const addPlayer = () => {
     if (players.length < 5) {
@@ -443,12 +444,12 @@ function StartModal({ table, customers, onStart, onClose }: {
 
         {mode === 'timer' ? (
           <div className="mb-3">
-            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate ₹/hour</label>
+            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate per 30 min</label>
             <input type="number" value={hourRate} onChange={(e) => setHourRate(Number(e.target.value))} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
             <label className="mb-1 mt-3 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Duration</label>
             <div className="flex gap-1.5">
               {DURATIONS.map((d) => (
-                <button key={d.minutes} onClick={() => setDurationMin(d.minutes)} className={`flex-1 rounded-lg py-1.5 font-display text-[0.65rem] font-bold uppercase transition-colors ${durationMin === d.minutes ? 'bg-gold text-ink' : 'border border-white/12 text-white/55 hover:border-gold/40'}`}>
+                <button key={d.minutes} onClick={() => setDurationMin(d.minutes === durationMin ? 0 : d.minutes)} className={`flex-1 rounded-lg py-1.5 font-display text-[0.65rem] font-bold uppercase transition-colors ${durationMin === d.minutes && d.minutes > 0 ? 'bg-gold text-ink' : 'border border-white/12 text-white/55 hover:border-gold/40'}`}>
                   {d.label}
                 </button>
               ))}
@@ -459,6 +460,56 @@ function StartModal({ table, customers, onStart, onClose }: {
                 <span className="font-display font-bold text-gold">₹{fixedAmount}</span>
               </div>
             )}
+            {/* Players for timer (optional — for khata tracking) */}
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Players <span className="normal-case text-white/25">(optional, for Khata)</span></label>
+                <button onClick={addPlayer} disabled={players.length >= 5} className="flex items-center gap-1 rounded-md border border-gold/30 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-gold disabled:opacity-30">
+                  <PlusIcon size={10} /> Add
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {players.map((p, i) => (
+                  <div key={i} className="relative">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          value={p} onChange={(e) => updatePlayer(i, e.target.value)}
+                          placeholder={`Player ${i + 1}`}
+                          className={`w-full rounded-lg border px-3 py-2 pr-8 text-sm text-white outline-none focus:border-gold ${playerIds[i] ? 'border-gold/40 bg-gold/5' : 'border-white/15 bg-ink'}`}
+                        />
+                        <button
+                          onClick={() => setPlayerPicker(playerPicker === i ? null : i)}
+                          className={`absolute right-2 top-1/2 -translate-y-1/2 ${playerIds[i] ? 'text-gold' : 'text-white/25 hover:text-white/60'}`}
+                          title="Link to Khata customer"
+                        ><LinkIcon size={13} /></button>
+                      </div>
+                      {players.length > 2 && (
+                        <button onClick={() => removePlayer(i)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light">
+                          <Minus size={14} />
+                        </button>
+                      )}
+                    </div>
+                    {playerPicker === i && (
+                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border border-gold/25 bg-ink-2 py-1 shadow-xl">
+                        {customers.length === 0 && <div className="px-3 py-2 text-[0.72rem] text-white/35">No khata customers yet</div>}
+                        {customers.map((c) => (
+                          <button key={c._id} onClick={() => linkPlayer(i, c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
+                            <span>{c.name}</span>
+                            {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {players.some((_, i) => playerIds[i]) && (
+                <div className="mt-2 rounded-lg border border-gold/15 bg-gold/[0.04] px-3 py-2 text-[0.68rem] text-white/40">
+                  <span className="text-gold">🔗 Linked:</span> {players.filter((_, i) => playerIds[i]).join(', ')}
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <>
@@ -564,8 +615,7 @@ function StartModal({ table, customers, onStart, onClose }: {
         <button
           onClick={() => onStart({
             mode, customerName: cust, customerId: custId, hourRate, frameCharge,
-            players: mode === 'frames' ? players : [],
-            playerIds: mode === 'frames' ? playerIds : [],
+            players, playerIds,
             startTime: Date.now() - Number(agoMin || 0) * 60000,
             selectedDuration: durationMin > 0 ? durationMin : undefined,
           })}
@@ -1414,6 +1464,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [showReport, setShowReport] = useState(false)
   const pinActionRef = useRef<(() => void) | null>(null)
   const [showPinGate, setShowPinGate] = useState(false)
+  const [addPlayerFor, setAddPlayerFor] = useState<string | null>(null) // tableId
   const requirePin = useCallback((action: () => void) => { pinActionRef.current = action; setShowPinGate(true) }, [])
   const [editBill, setEditBill] = useState<Bill | null>(null)
   const [showProfile, setShowProfile] = useState(false)
@@ -1720,9 +1771,24 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                     </div>
 
                     {s.mode === 'timer' ? (
-                      <div className="mt-2 flex items-end justify-between">
-                        <span className={`font-display text-xl font-bold tabular-nums ${isOvertime ? 'text-red-light' : 'text-white'}`}>{fmtDuration(now - s.startTime)}</span>
-                        <span className="font-display text-lg font-bold text-gold">{rupee(amt)}</span>
+                      <div className="mt-2">
+                        <div className="flex items-end justify-between">
+                          <span className={`font-display text-xl font-bold tabular-nums ${isOvertime ? 'text-red-light' : 'text-white'}`}>{fmtDuration(now - s.startTime)}</span>
+                          <span className="font-display text-lg font-bold text-gold">{rupee(amt)}</span>
+                        </div>
+                        {/* Timer players (for khata tracking) */}
+                        {(s.players?.length > 0 && s.players.some(Boolean)) && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {s.players.filter(Boolean).map((p, i) => (
+                              <span key={i} className="flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-0.5 text-[0.65rem] text-white/65">
+                                {p}{(s.playerIds || [])[i] && <span className="text-gold text-[0.55rem]">🔗</span>}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <button onClick={() => setAddPlayerFor(t.id)} className="mt-1.5 flex items-center gap-1 text-[0.62rem] text-white/30 hover:text-gold transition-colors">
+                          <PlusIcon size={10} /> Add player
+                        </button>
                       </div>
                     ) : (
                       <div className="mt-2">
@@ -1934,6 +2000,91 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
       {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
       {addExpense && <AddExpenseModal type="out" onSaved={refreshExpenses} onClose={() => setAddExpense(false)} />}
       {addCashIn && <AddExpenseModal type="in" onSaved={refreshExpenses} onClose={() => setAddCashIn(false)} />}
+      {addPlayerFor && (
+        <AddPlayerModal
+          tableId={addPlayerFor}
+          session={sessions[addPlayerFor]}
+          customers={customers}
+          onSaved={refreshTables}
+          onClose={() => setAddPlayerFor(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Add player mid-session ──
+function AddPlayerModal({ tableId, session, customers, onSaved, onClose }: {
+  tableId: string; session: ApiSession
+  customers: Array<{ _id: string; name: string; balance?: number }>
+  onSaved: () => void; onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [linkedId, setLinkedId] = useState('')
+  const [search, setSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+
+  const selectCustomer = (c: { _id: string; name: string }) => {
+    setName(c.name); setLinkedId(c._id); setSearch('')
+  }
+
+  const save = async () => {
+    if (!name.trim()) return
+    setBusy(true)
+    const newPlayers = [...(session.players || []), name.trim()]
+    const newPlayerIds = [...(session.playerIds || []), linkedId]
+    try {
+      await api.patch(`/sessions/${tableId}`, { players: newPlayers, playerIds: newPlayerIds })
+      onSaved(); onClose()
+    } catch { setBusy(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-ink/85 backdrop-blur-sm p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-xs rounded-2xl border border-gold/20 bg-ink-2 p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-gold">Add Player</h3>
+            <p className="text-[0.65rem] text-white/35">Link to Khata or enter name</p>
+          </div>
+          <button onClick={onClose}><X size={16} className="text-white/40" /></button>
+        </div>
+        {/* Search existing khata customers */}
+        <label className="mb-1 block text-[0.6rem] uppercase tracking-wider text-white/40">Search Khata</label>
+        <input
+          value={search} onChange={(e) => { setSearch(e.target.value); setLinkedId(''); setName(e.target.value) }}
+          placeholder="Type to search…"
+          className="mb-1 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold"
+        />
+        {search && filtered.length > 0 && (
+          <div className="mb-2 max-h-32 overflow-y-auto rounded-lg border border-white/10 bg-ink">
+            {filtered.map((c) => (
+              <button key={c._id} onClick={() => selectCustomer(c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
+                <span>{c.name}</span>
+                {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {linkedId && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-gold/20 bg-gold/6 px-3 py-1.5 text-[0.72rem] text-gold">
+            <span>🔗</span> <span>{name} — linked to Khata</span>
+          </div>
+        )}
+        {!linkedId && name && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[0.72rem] text-white/40">
+            <span>Walk-in player (not linked to Khata)</span>
+          </div>
+        )}
+        <div className="flex gap-2 mt-2">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
+          <button onClick={save} disabled={busy || !name.trim()} className="flex-1 rounded-lg bg-gold py-2.5 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-40">
+            {busy ? 'Adding…' : 'Add Player'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

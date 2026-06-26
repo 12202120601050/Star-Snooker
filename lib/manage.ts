@@ -115,10 +115,11 @@ export function fmtDuration(ms: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
-// Hourly bill — minimum 30 min charge, then prorated to the minute.
-export function timerAmount(hourRate: number, ms: number): number {
-  const hours = Math.max(0.5, ms / 3_600_000)
-  return Math.round(hours * hourRate)
+// Timer bill — uses the per-30-min (frame) rate. Minimum 1 slot (30 min), then
+// prorated per minute beyond that in 30-min units.
+export function timerAmount(halfHourRate: number, ms: number): number {
+  const slots = Math.max(1, ms / 1_800_000) // minimum 1 × 30-min slot
+  return Math.round(slots * halfHourRate)
 }
 
 // Loser-pays: each frame, the loser owes the frame charge. Returns per-player
