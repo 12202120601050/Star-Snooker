@@ -6,7 +6,7 @@ import {
   LayoutGrid, Receipt, Coffee, ClipboardCheck, BarChart3, BookUser,
   LogOut, Play, Square, Trophy, X, Plus as PlusIcon, FileText,
   Minus, ChevronDown, ChevronUp, AlertTriangle, TrendingUp, Wallet,
-  CheckCircle, Clock, Bell, Link as LinkIcon, Pencil, Trash2,
+  CheckCircle, Clock, Bell, Pencil, Trash2,
   User as UserIcon, KeyRound,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -383,6 +383,114 @@ function EditBillModal({ bill, onSaved, onClose }: { bill: Bill; onSaved: () => 
   )
 }
 
+// ── Player select (from Khata, with inline create) ──
+function PlayerSelect({
+  index, name, id, customers, onSet, onRemove,
+}: {
+  index: number; name: string; id: string
+  customers: Array<{ _id: string; name: string; balance?: number }>
+  onSet: (name: string, id: string) => void
+  onRemove?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createErr, setCreateErr] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) { setOpen(false); setAdding(false); setSearch('') } }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+
+  const select = (c: { _id: string; name: string }) => { onSet(c.name, c._id); setOpen(false); setSearch(''); setAdding(false) }
+
+  const createAndSelect = async () => {
+    if (!newName.trim() || !newPhone.trim()) return
+    setCreating(true); setCreateErr('')
+    try {
+      const { data } = await api.post('/customers', { name: newName.trim(), phone: newPhone.trim() })
+      onSet(data.name, data._id); setOpen(false); setAdding(false); setNewName(''); setNewPhone('')
+    } catch (e: any) {
+      setCreateErr(e.response?.data?.message || 'Failed to add customer')
+    } finally { setCreating(false) }
+  }
+
+  return (
+    <div ref={ref} className="relative flex items-center gap-2">
+      <div className="flex-1">
+        {name ? (
+          <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${id ? 'border-gold/40 bg-gold/5' : 'border-white/15 bg-ink'}`}>
+            <span className="flex items-center gap-1.5 text-sm text-white">
+              {name}
+              {id && <span className="text-[0.58rem] text-gold">🔗 Khata</span>}
+            </span>
+            <button onClick={() => onSet('', '')} className="text-white/25 hover:text-white/70 transition-colors"><X size={13} /></button>
+          </div>
+        ) : (
+          <button onClick={() => setOpen(true)} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2.5 text-left text-[0.82rem] text-white/35 hover:border-gold/30 transition-colors">
+            Player {index + 1} — select from Khata…
+          </button>
+        )}
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-gold/25 bg-ink-2 shadow-2xl">
+            {!adding ? (
+              <>
+                <div className="p-2">
+                  <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…"
+                    className="w-full rounded-lg border border-white/12 bg-ink px-3 py-1.5 text-[0.82rem] text-white outline-none focus:border-gold" />
+                </div>
+                <div className="max-h-36 overflow-y-auto">
+                  {filtered.map(c => (
+                    <button key={c._id} onClick={() => select(c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.8rem] text-white hover:bg-white/5">
+                      <span>{c.name}</span>
+                      {(c.balance || 0) > 0 && <span className="text-[0.62rem] text-red-light">owes {rupee(c.balance!)}</span>}
+                    </button>
+                  ))}
+                  {filtered.length === 0 && <div className="px-3 py-2 text-[0.72rem] text-white/35">No match for "{search}"</div>}
+                </div>
+                <div className="border-t border-white/8 p-2">
+                  <button onClick={() => { setAdding(true); setNewName(search); setSearch('') }} className="w-full rounded-lg border border-gold/30 py-1.5 text-[0.72rem] font-bold text-gold hover:bg-gold/5">
+                    + Add new customer to Khata
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2 p-3">
+                <div className="mb-1 text-[0.62rem] font-bold uppercase tracking-wider text-gold">New Khata Customer</div>
+                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full name"
+                  className="w-full rounded-lg border border-white/12 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+                <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndSelect()}
+                  placeholder="Phone number" type="tel"
+                  className="w-full rounded-lg border border-white/12 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+                {createErr && <p className="text-[0.68rem] text-red-light">{createErr}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => setAdding(false)} className="flex-1 rounded-lg border border-white/12 py-1.5 text-[0.7rem] text-white/50">Back</button>
+                  <button onClick={createAndSelect} disabled={creating || !newName.trim() || !newPhone.trim()} className="flex-1 rounded-lg bg-gold py-1.5 text-[0.7rem] font-bold text-ink disabled:opacity-40">
+                    {creating ? '…' : 'Add & Select'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {onRemove && (
+        <button onClick={onRemove} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light transition-colors">
+          <Minus size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Start modal ──
 function StartModal({ table, customers, onStart, onClose }: {
   table: TableConfig
@@ -392,41 +500,31 @@ function StartModal({ table, customers, onStart, onClose }: {
   const [mode, setMode] = useState<'timer' | 'frames'>('timer')
   const [cust, setCust] = useState('Walk-in')
   const [custId, setCustId] = useState<string | null>(null)
-  const [players, setPlayers] = useState(['Player 1', 'Player 2'])
+  const [players, setPlayers] = useState<string[]>(['', ''])
   const [playerIds, setPlayerIds] = useState<string[]>(['', ''])
-  const [playerPicker, setPlayerPicker] = useState<number | null>(null)
-  const [hourRate, setHourRate] = useState(table.frame ?? 0) // per-30-min rate
-  const [frameCharge, setFrameCharge] = useState(table.frame ?? 0)
+  const [rate, setRate] = useState(table.frame ?? 0) // per-frame = per-30-min
   const [durationMin, setDurationMin] = useState(0)
   const [forgot, setForgot] = useState(false)
   const [agoMin, setAgoMin] = useState('0')
 
-  const fixedAmount = durationMin > 0 ? Math.round(hourRate * (durationMin / 30)) : null
+  const fixedAmount = durationMin > 0 ? Math.round(rate * (durationMin / 30)) : null
 
+  const setPlayer = (i: number, name: string, id: string) => {
+    setPlayers(prev => prev.map((p, j) => j === i ? name : p))
+    setPlayerIds(prev => prev.map((pid, j) => j === i ? id : pid))
+  }
   const addPlayer = () => {
-    if (players.length < 5) {
-      setPlayers([...players, `Player ${players.length + 1}`])
-      setPlayerIds([...playerIds, ''])
-    }
+    if (players.length < 5) { setPlayers(p => [...p, '']); setPlayerIds(p => [...p, '']) }
   }
   const removePlayer = (i: number) => {
     if (players.length > 2) {
-      setPlayers(players.filter((_, j) => j !== i))
-      setPlayerIds(playerIds.filter((_, j) => j !== i))
+      setPlayers(prev => prev.filter((_, j) => j !== i))
+      setPlayerIds(prev => prev.filter((_, j) => j !== i))
     }
-  }
-  const updatePlayer = (i: number, v: string) => {
-    setPlayers(players.map((p, j) => j === i ? v : p))
-    setPlayerIds(playerIds.map((id, j) => j === i ? '' : id)) // unlink if typing manually
-  }
-  const linkPlayer = (i: number, c: { _id: string; name: string }) => {
-    setPlayers(players.map((p, j) => j === i ? c.name : p))
-    setPlayerIds(playerIds.map((id, j) => j === i ? c._id : id))
-    setPlayerPicker(null)
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); setPlayerPicker(null) }}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-gold/25 bg-ink-2 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-display text-base font-bold uppercase text-white">{tableEmoji(table.id)} Start {table.name}</h3>
@@ -442,11 +540,14 @@ function StartModal({ table, customers, onStart, onClose }: {
           ))}
         </div>
 
-        {mode === 'timer' ? (
+        {/* Rate — same for both modes (per frame = per 30 min) */}
+        <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate per frame / 30 min</label>
+        <input type="number" value={rate} onChange={(e) => setRate(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
+
+        {/* Duration (timer only) */}
+        {mode === 'timer' && (
           <div className="mb-3">
-            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Rate per 30 min</label>
-            <input type="number" value={hourRate} onChange={(e) => setHourRate(Number(e.target.value))} className="w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
-            <label className="mb-1 mt-3 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Duration</label>
+            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Duration</label>
             <div className="flex gap-1.5">
               {DURATIONS.map((d) => (
                 <button key={d.minutes} onClick={() => setDurationMin(d.minutes === durationMin ? 0 : d.minutes)} className={`flex-1 rounded-lg py-1.5 font-display text-[0.65rem] font-bold uppercase transition-colors ${durationMin === d.minutes && d.minutes > 0 ? 'bg-gold text-ink' : 'border border-white/12 text-white/55 hover:border-gold/40'}`}>
@@ -456,117 +557,42 @@ function StartModal({ table, customers, onStart, onClose }: {
             </div>
             {fixedAmount !== null && (
               <div className="mt-2 flex items-center justify-between rounded-lg bg-gold/[0.08] px-3 py-2">
-                <span className="text-[0.72rem] text-white/50">Fixed charge</span>
+                <span className="text-[0.72rem] text-white/50">Fixed charge ({durationMin / 30} frame{durationMin > 30 ? 's' : ''})</span>
                 <span className="font-display font-bold text-gold">₹{fixedAmount}</span>
               </div>
             )}
-            {/* Players for timer (optional — for khata tracking) */}
-            <div className="mt-3">
-              <div className="mb-1 flex items-center justify-between">
-                <label className="text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Players <span className="normal-case text-white/25">(optional, for Khata)</span></label>
-                <button onClick={addPlayer} disabled={players.length >= 5} className="flex items-center gap-1 rounded-md border border-gold/30 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-gold disabled:opacity-30">
-                  <PlusIcon size={10} /> Add
-                </button>
-              </div>
-              <div className="space-y-1.5">
-                {players.map((p, i) => (
-                  <div key={i} className="relative">
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <input
-                          value={p} onChange={(e) => updatePlayer(i, e.target.value)}
-                          placeholder={`Player ${i + 1}`}
-                          className={`w-full rounded-lg border px-3 py-2 pr-8 text-sm text-white outline-none focus:border-gold ${playerIds[i] ? 'border-gold/40 bg-gold/5' : 'border-white/15 bg-ink'}`}
-                        />
-                        <button
-                          onClick={() => setPlayerPicker(playerPicker === i ? null : i)}
-                          className={`absolute right-2 top-1/2 -translate-y-1/2 ${playerIds[i] ? 'text-gold' : 'text-white/25 hover:text-white/60'}`}
-                          title="Link to Khata customer"
-                        ><LinkIcon size={13} /></button>
-                      </div>
-                      {players.length > 2 && (
-                        <button onClick={() => removePlayer(i)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light">
-                          <Minus size={14} />
-                        </button>
-                      )}
-                    </div>
-                    {playerPicker === i && (
-                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border border-gold/25 bg-ink-2 py-1 shadow-xl">
-                        {customers.length === 0 && <div className="px-3 py-2 text-[0.72rem] text-white/35">No khata customers yet</div>}
-                        {customers.map((c) => (
-                          <button key={c._id} onClick={() => linkPlayer(i, c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
-                            <span>{c.name}</span>
-                            {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {players.some((_, i) => playerIds[i]) && (
-                <div className="mt-2 rounded-lg border border-gold/15 bg-gold/[0.04] px-3 py-2 text-[0.68rem] text-white/40">
-                  <span className="text-gold">🔗 Linked:</span> {players.filter((_, i) => playerIds[i]).join(', ')}
-                </div>
-              )}
-            </div>
           </div>
-        ) : (
-          <>
-            <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Charge ₹/frame</label>
-            <input type="number" value={frameCharge} onChange={(e) => setFrameCharge(Number(e.target.value))} className="mb-3 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold" />
-            <div className="mb-1 flex items-center justify-between">
-              <label className="text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Players</label>
-              <button onClick={addPlayer} disabled={players.length >= 5} className="flex items-center gap-1 rounded-md border border-gold/30 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-gold disabled:opacity-30">
-                <PlusIcon size={10} /> Add
-              </button>
-            </div>
-            <div className="mb-3 space-y-1.5">
-              {players.map((p, i) => (
-                <div key={i} className="relative">
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        value={p}
-                        onChange={(e) => updatePlayer(i, e.target.value)}
-                        placeholder={`Player ${i + 1}`}
-                        className={`w-full rounded-lg border px-3 py-2 pr-8 text-sm text-white outline-none focus:border-gold ${playerIds[i] ? 'border-gold/40 bg-gold/5' : 'border-white/15 bg-ink'}`}
-                      />
-                      <button
-                        onClick={() => setPlayerPicker(playerPicker === i ? null : i)}
-                        className={`absolute right-2 top-1/2 -translate-y-1/2 ${playerIds[i] ? 'text-gold' : 'text-white/25 hover:text-white/60'}`}
-                        title="Link to registered customer"
-                      >
-                        <LinkIcon size={13} />
-                      </button>
-                    </div>
-                    {players.length > 2 && (
-                      <button onClick={() => removePlayer(i)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 text-white/40 hover:border-red-light hover:text-red-light">
-                        <Minus size={14} />
-                      </button>
-                    )}
-                  </div>
-                  {playerPicker === i && (
-                    <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border border-gold/25 bg-ink-2 py-1 shadow-xl">
-                      {customers.length === 0 && <div className="px-3 py-2 text-[0.72rem] text-white/35">No registered customers</div>}
-                      {customers.map((c) => (
-                        <button key={c._id} onClick={() => linkPlayer(i, c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
-                          <span>{c.name}</span>
-                          {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {players.some((_, i) => playerIds[i]) && (
-              <div className="mb-3 rounded-lg border border-gold/15 bg-gold/[0.04] px-3 py-2 text-[0.68rem] text-white/40">
-                <span className="text-gold">🔗 Linked:</span> {players.filter((_, i) => playerIds[i]).join(', ')} — frame debts will auto-update their khata.
-              </div>
-            )}
-          </>
         )}
+
+        {/* Players — select from Khata (both modes) */}
+        <div className="mb-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="text-[0.7rem] font-bold uppercase tracking-wider text-white/40">
+              Players <span className="normal-case text-white/25">{mode === 'timer' ? '(for Khata tracking)' : '(loser pays per frame)'}</span>
+            </label>
+            <button onClick={addPlayer} disabled={players.length >= 5} className="flex items-center gap-1 rounded-md border border-gold/30 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-gold disabled:opacity-30">
+              <PlusIcon size={10} /> Add
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {players.map((p, i) => (
+              <PlayerSelect
+                key={i}
+                index={i}
+                name={p}
+                id={playerIds[i]}
+                customers={customers}
+                onSet={(n, id) => setPlayer(i, n, id)}
+                onRemove={players.length > 2 ? () => removePlayer(i) : undefined}
+              />
+            ))}
+          </div>
+          {mode === 'frames' && players.some((_, i) => playerIds[i]) && (
+            <div className="mt-2 rounded-lg border border-gold/15 bg-gold/[0.04] px-3 py-2 text-[0.68rem] text-white/40">
+              <span className="text-gold">🔗</span> Frame debts will auto-update their Khata balance.
+            </div>
+          )}
+        </div>
 
         <label className="mb-1 block text-[0.7rem] font-bold uppercase tracking-wider text-white/40">Customer</label>
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -614,7 +640,8 @@ function StartModal({ table, customers, onStart, onClose }: {
 
         <button
           onClick={() => onStart({
-            mode, customerName: cust, customerId: custId, hourRate, frameCharge,
+            mode, customerName: cust, customerId: custId,
+            hourRate: rate, frameCharge: rate, // both use same per-frame/30-min rate
             players, playerIds,
             startTime: Date.now() - Number(agoMin || 0) * 60000,
             selectedDuration: durationMin > 0 ? durationMin : undefined,
@@ -2021,14 +2048,7 @@ function AddPlayerModal({ tableId, session, customers, onSaved, onClose }: {
 }) {
   const [name, setName] = useState('')
   const [linkedId, setLinkedId] = useState('')
-  const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
-
-  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
-
-  const selectCustomer = (c: { _id: string; name: string }) => {
-    setName(c.name); setLinkedId(c._id); setSearch('')
-  }
 
   const save = async () => {
     if (!name.trim()) return
@@ -2047,38 +2067,20 @@ function AddPlayerModal({ tableId, session, customers, onSaved, onClose }: {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="font-display text-[0.75rem] font-bold uppercase tracking-widest text-gold">Add Player</h3>
-            <p className="text-[0.65rem] text-white/35">Link to Khata or enter name</p>
+            <p className="text-[0.65rem] text-white/35">Select from Khata or add new</p>
           </div>
           <button onClick={onClose}><X size={16} className="text-white/40" /></button>
         </div>
-        {/* Search existing khata customers */}
-        <label className="mb-1 block text-[0.6rem] uppercase tracking-wider text-white/40">Search Khata</label>
-        <input
-          value={search} onChange={(e) => { setSearch(e.target.value); setLinkedId(''); setName(e.target.value) }}
-          placeholder="Type to search…"
-          className="mb-1 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-sm text-white outline-none focus:border-gold"
-        />
-        {search && filtered.length > 0 && (
-          <div className="mb-2 max-h-32 overflow-y-auto rounded-lg border border-white/10 bg-ink">
-            {filtered.map((c) => (
-              <button key={c._id} onClick={() => selectCustomer(c)} className="flex w-full items-center justify-between px-3 py-2 text-[0.78rem] text-white hover:bg-white/5">
-                <span>{c.name}</span>
-                {(c.balance || 0) > 0 && <span className="text-[0.65rem] text-red-light">owes {rupee(c.balance!)}</span>}
-              </button>
-            ))}
-          </div>
-        )}
-        {linkedId && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-gold/20 bg-gold/6 px-3 py-1.5 text-[0.72rem] text-gold">
-            <span>🔗</span> <span>{name} — linked to Khata</span>
-          </div>
-        )}
-        {!linkedId && name && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[0.72rem] text-white/40">
-            <span>Walk-in player (not linked to Khata)</span>
-          </div>
-        )}
-        <div className="flex gap-2 mt-2">
+        <div className="mb-4">
+          <PlayerSelect
+            index={(session.players?.length || 0)}
+            name={name}
+            id={linkedId}
+            customers={customers}
+            onSet={(n, id) => { setName(n); setLinkedId(id) }}
+          />
+        </div>
+        <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-lg border border-white/15 py-2.5 font-display text-[0.7rem] font-bold uppercase text-white/50">Cancel</button>
           <button onClick={save} disabled={busy || !name.trim()} className="flex-1 rounded-lg bg-gold py-2.5 font-display text-[0.7rem] font-bold uppercase text-ink disabled:opacity-40">
             {busy ? 'Adding…' : 'Add Player'}
