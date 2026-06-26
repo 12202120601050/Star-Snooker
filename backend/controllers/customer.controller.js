@@ -63,11 +63,15 @@ exports.createCustomer = async (req, res) => {
   try {
     const { name, phone, pin } = req.body;
     if (!name || !phone) return res.status(400).json({ message: 'Name and phone required' });
-    const exists = await Customer.findOne({ phone });
-    if (exists) return res.status(400).json({ message: 'Phone already registered' });
-    // Default PIN = last 4 digits of phone (customer can change later)
     const defaultPin = pin || phone.replace(/\D/g,'').slice(-4);
     const hashedPin = await bcrypt.hash(defaultPin, 10);
+    const exists = await Customer.findOne({ phone });
+    if (exists) {
+      if (exists.isActive) return res.status(400).json({ message: 'Phone already registered' });
+      // Re-activate a soft-deleted customer with fresh name/PIN
+      const restored = await Customer.findByIdAndUpdate(exists._id, { isActive: true, name, pin: hashedPin }, { new: true });
+      return res.status(201).json({ ...restored.toObject(), pin: undefined, defaultPin });
+    }
     const customer = await Customer.create({ name, phone, pin: hashedPin });
     res.status(201).json({ ...customer.toObject(), pin: undefined, defaultPin });
   } catch (err) {
@@ -101,20 +105,57 @@ exports.deleteCustomer = async (req, res) => {
   }
 };
 
+// GET /api/customers/deleted — list soft-deleted customers (admin only)
+exports.getDeletedCustomers = async (req, res) => {
+  try {
+    const customers = await Customer.find({ isActive: false })
+      .select('-pin')
+      .sort({ updatedAt: -1 })
+      .limit(30);
+    res.json(customers);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch deleted customers' });
+  }
+};
+
+// PUT /api/customers/:id/restore — restore a soft-deleted customer (admin only)
+exports.restoreCustomer = async (req, res) => {
+  try {
+    await Customer.findByIdAndUpdate(req.params.id, { isActive: true });
+    res.json({ message: 'Customer restored' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to restore customer' });
+  }
+};
+
+// DELETE /api/customers/:id/permanent — hard delete from DB (admin only)
+exports.permanentDeleteCustomer = async (req, res) => {
+  try {
+    await Customer.findByIdAndDelete(req.params.id);
+    await KhataTransaction.deleteMany({ customerId: req.params.id });
+    res.json({ message: 'Customer permanently deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to permanently delete customer' });
+  }
+};
+
 // POST /api/customers/register — self-registration with OTP already verified
 exports.registerCustomer = async (req, res) => {
   try {
     const { name, phone, pin } = req.body;
     if (!name || !phone || !pin) return res.status(400).json({ message: 'All fields required' });
-    const exists = await Customer.findOne({ phone });
-    if (exists) return res.status(400).json({ message: 'Phone already registered' });
     const hashedPin = await bcrypt.hash(pin, 10);
+    const exists = await Customer.findOne({ phone });
+    if (exists) {
+      if (exists.isActive) return res.status(400).json({ message: 'Phone already registered' });
+      // Re-activate soft-deleted account
+      const restored = await Customer.findByIdAndUpdate(exists._id, { isActive: true, name, pin: hashedPin }, { new: true });
+      const token = jwt.sign({ id: restored._id, role: 'customer' }, process.env.JWT_SECRET, { expiresIn: '30d' });
+      return res.status(201).json({ token, customer: { ...restored.toObject(), pin: undefined } });
+    }
     const customer = await Customer.create({ name, phone, pin: hashedPin });
     const token = jwt.sign({ id: customer._id, role: 'customer' }, process.env.JWT_SECRET, { expiresIn: '30d' });
-    res.status(201).json({
-      token,
-      customer: { ...customer.toObject(), pin: undefined }
-    });
+    res.status(201).json({ token, customer: { ...customer.toObject(), pin: undefined } });
   } catch (err) {
     res.status(500).json({ message: 'Registration failed' });
   }

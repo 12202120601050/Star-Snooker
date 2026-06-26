@@ -14,10 +14,13 @@ r.get('/me', protect, anyAuth, c.getMe);
 r.use(protect, staffOrAdmin);
 r.get('/', c.getCustomers);
 r.post('/', c.createCustomer);
+r.get('/deleted', adminOnly, c.getDeletedCustomers); // must be before /:id
 r.get('/:id', c.getCustomer);
 r.put('/:id', c.updateCustomer);
 
 // Admin only
 r.delete('/:id', protect, adminOnly, c.deleteCustomer);
+r.put('/:id/restore', protect, adminOnly, c.restoreCustomer);
+r.delete('/:id/permanent', protect, adminOnly, c.permanentDeleteCustomer);
 
 module.exports = r;

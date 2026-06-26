@@ -511,6 +511,21 @@ function StartModal({ table, customers, onStart, onClose }: {
 
   const fixedAmount = durationMin > 0 ? fixedSessionAmount(durationMin, hourRate, frameRate) : null
 
+  // When any player gets linked to Khata, auto-set them as the billing customer (if still Walk-in)
+  const playerIdsKey = playerIds.join(',')
+  useEffect(() => {
+    const idx = playerIds.findIndex(id => !!id)
+    if (idx >= 0 && cust === 'Walk-in') {
+      setCust(players[idx] || 'Walk-in')
+      setCustId(playerIds[idx])
+    }
+    // Unset if last player link removed
+    if (playerIds.every(id => !id) && custId && !customers.some(c => c._id === custId)) {
+      setCust('Walk-in'); setCustId(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerIdsKey])
+
   // When playerCount changes for multi-rate tables, update rates + player slots
   const handlePlayerCount = (count: number) => {
     setPlayerCount(count)
@@ -781,8 +796,18 @@ function BillModal({ table, session, now, onProcess, onClose }: {
   const [cashAmt, setCashAmt] = useState('')
   const [upiAmt, setUpiAmt] = useState('')
 
-  // Registration flow for credit with unregistered customer
-  const needsReg = pm === 'credit' && !session.customerId
+  // Players linked to Khata in this session (for credit selection)
+  const linkedPlayers = useMemo(() =>
+    (session.playerIds || []).map((id, i) => ({ id, name: (session.players || [])[i] || `P${i + 1}` })).filter(p => !!p.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(session.playerIds)]
+  )
+  // creditId: who pays on credit — defaults to session customer, then first linked player
+  const [creditId, setCreditId] = useState<string | null>(session.customerId || linkedPlayers[0]?.id || null)
+  const [creditName, setCreditName] = useState<string | null>(session.customerName || linkedPlayers[0]?.name || null)
+
+  // Registration flow for credit with completely unknown customer
+  const needsReg = pm === 'credit' && !creditId
   const isWalkIn = session.customerName === 'Walk-in' || !session.customerName
   const [regName, setRegName] = useState(isWalkIn ? '' : (session.customerName || ''))
   const [regPhone, setRegPhone] = useState('')
@@ -801,7 +826,6 @@ function BillModal({ table, session, now, onProcess, onClose }: {
   const handleUpiChange = (v: string) => { setUpiAmt(v); setCashAmt(String(Math.max(0, +(total - (Number(v) || 0)).toFixed(0)))) }
   const splitValid = pm !== 'split' || (Number(cashAmt) + Number(upiAmt) === total && total > 0)
 
-  // Credit is allowed to proceed only if customer is registered or registration done
   const creditReady = !needsReg || regState === 'done'
   const canCollect = splitValid && creditReady
 
@@ -831,8 +855,8 @@ function BillModal({ table, session, now, onProcess, onClose }: {
       pm, d,
       pm === 'split' ? Number(cashAmt) : undefined,
       pm === 'split' ? Number(upiAmt) : undefined,
-      resolvedId || undefined,
-      resolvedName || undefined,
+      resolvedId || creditId || undefined,
+      resolvedName || creditName || undefined,
     )
   }
 
@@ -882,14 +906,20 @@ function BillModal({ table, session, now, onProcess, onClose }: {
 
         {/* ── Credit flow ── */}
         {pm === 'credit' && (
-          session.customerId ? (
-            /* Registered customer — just confirm */
+          creditId ? (
+            /* Linked player or registered customer — confirm + optional player picker */
             <div className="mb-3 rounded-xl border border-red-light/20 bg-red-light/[0.05] px-3 py-2.5">
-              {frameMode && (session.playerIds || []).some(id => !id) ? (
-                <p className="text-[0.72rem] text-orange-400">⚠ Some players are not linked — their khata won't be updated.</p>
-              ) : (
-                <p className="text-[0.72rem] text-red-light">⚠ {rupee(total)} will be added to <span className="font-bold text-white">{session.customerName}</span>'s khata as outstanding balance.</p>
+              {linkedPlayers.length > 1 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  <p className="mb-1 w-full text-[0.62rem] uppercase tracking-wider text-white/40">Who pays on credit?</p>
+                  {linkedPlayers.map(p => (
+                    <button key={p.id} onClick={() => { setCreditId(p.id); setCreditName(p.name) }} className={`rounded-md px-2.5 py-1 text-[0.72rem] font-bold ${creditId === p.id ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
               )}
+              <p className="text-[0.72rem] text-red-light">⚠ {rupee(total)} will be added to <span className="font-bold text-white">{creditName}</span>'s khata as outstanding balance.</p>
             </div>
           ) : regState === 'done' ? (
             /* ✓ Registration succeeded */
@@ -1550,7 +1580,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
   const [bills, setBills] = useState<Bill[]>([])
   const [canteen, setCanteen] = useState<Item[]>([])
   const [khata, setKhata] = useState<any[]>([])
-  const [tab, setTab] = useState<'tables' | 'bills' | 'canteen' | 'shift' | 'khata' | 'finance'>('tables')
+  const [tab, setTab] = useState<'tables' | 'bills' | 'canteen' | 'shift' | 'khata' | 'finance' | 'history'>('tables')
   const [startFor, setStartFor] = useState<TableConfig | null>(null)
   const [billFor, setBillFor] = useState<TableConfig | null>(null)
   const [frameFor, setFrameFor] = useState<string | null>(null)
@@ -1765,7 +1795,10 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
     { id: 'canteen', label: 'Canteen', icon: Coffee },
     { id: 'shift', label: 'Shift', icon: ClipboardCheck },
     { id: 'khata', label: 'Khata', icon: BookUser },
-    ...(admin ? [{ id: 'finance', label: 'Finance', icon: BarChart3 } as const] : []),
+    ...(admin ? [
+      { id: 'finance', label: 'Finance', icon: BarChart3 } as const,
+      { id: 'history', label: 'History', icon: Trash2 } as const,
+    ] : []),
   ] as const
 
   return (
@@ -1939,6 +1972,13 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
                       </div>
                     )}
 
+                    {/* Add player — available in both timer and frames modes */}
+                    {s.mode === 'frames' && (
+                      <button onClick={() => setAddPlayerFor(t.id)} className="mt-2 flex items-center gap-1 text-[0.62rem] text-white/30 hover:text-gold transition-colors">
+                        <PlusIcon size={10} /> Add player
+                      </button>
+                    )}
+
                     <div className="mt-3 grid grid-cols-2 gap-1.5">
                       <button onClick={() => setBillFor(t)} className="rounded-lg bg-red py-2 text-[0.72rem] font-bold uppercase text-white">
                         <Square size={11} className="mr-1 inline" />Bill
@@ -2084,6 +2124,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
         {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
         {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
         {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} expenses={expenses} onShowReport={() => setShowReport(true)} />}
+        {tab === 'history' && admin && <HistoryTab />}
       </main>
 
       {startFor && <StartModal table={startFor} customers={customers} onStart={(o) => start(startFor, o)} onClose={() => setStartFor(null)} />}
@@ -2316,6 +2357,67 @@ function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }
         )})}
       </div>
       <button onClick={save} className="mt-4 w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white">Save Shift Count</button>
+    </div>
+  )
+}
+
+// ── Admin History tab — deleted customers (restore / permanently delete) ──
+function HistoryTab() {
+  const [deleted, setDeleted] = useState<Array<{ _id: string; name: string; phone?: string; updatedAt?: string }>>([])
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const load = async () => {
+    try { const { data } = await api.get('/customers/deleted'); setDeleted(data || []) } catch {}
+  }
+  useEffect(() => { load() }, [])
+
+  const restore = async (id: string) => {
+    setBusy(id)
+    try { await api.put(`/customers/${id}/restore`); await load() } catch {}
+    setBusy(null)
+  }
+  const permanent = async (id: string, name: string) => {
+    if (!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return
+    setBusy(id)
+    try { await api.delete(`/customers/${id}/permanent`); await load() } catch {}
+    setBusy(null)
+  }
+
+  return (
+    <div className="mx-auto max-w-content px-4 py-6 sm:px-6">
+      <h2 className="mb-1 font-display text-lg font-bold text-white">Deleted Customers</h2>
+      <p className="mb-4 text-[0.72rem] text-white/40">Last 30 soft-deleted profiles. Restore to re-activate or permanently remove.</p>
+      {deleted.length === 0 ? (
+        <div className="rounded-xl border border-white/8 bg-white/[0.02] p-6 text-center text-[0.78rem] text-white/30">No deleted customers</div>
+      ) : (
+        <div className="space-y-2">
+          {deleted.map((c) => (
+            <div key={c._id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+              <div>
+                <div className="font-semibold text-white/80">{c.name}</div>
+                {c.phone && <div className="text-[0.65rem] text-white/35">{c.phone}</div>}
+                {c.updatedAt && <div className="text-[0.6rem] text-white/25">Deleted {new Date(c.updatedAt).toLocaleDateString('en-IN')}</div>}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => restore(c._id)}
+                  disabled={busy === c._id}
+                  className="rounded-lg border border-green-400/40 bg-green-400/10 px-3 py-1.5 text-[0.68rem] font-bold text-green-400 disabled:opacity-40"
+                >
+                  {busy === c._id ? '…' : 'Restore'}
+                </button>
+                <button
+                  onClick={() => permanent(c._id, c.name)}
+                  disabled={busy === c._id}
+                  className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-3 py-1.5 text-[0.68rem] font-bold text-red-light disabled:opacity-40"
+                >
+                  {busy === c._id ? '…' : 'Delete Forever'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
