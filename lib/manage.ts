@@ -5,8 +5,9 @@
 export type TableConfig = {
   id: string
   name: string
-  frame: number | null // per-frame (half-hour) charge; null = no frame play
-  hour: number | null // per-hour charge; null = frame-only
+  frame: number | null // per-frame (30-min) charge
+  hour: number | null  // per-hour charge
+  playerRates?: Record<number, { frame: number; hour: number }> // variable by player count
 }
 
 // Mirrors the club's price list. Carrom/TT frame charge is editable at start
@@ -24,10 +25,10 @@ export const TABLES: TableConfig[] = [
   { id: 'pool2', name: 'Pool 2', frame: 80, hour: 150 },
   { id: 'pool3', name: 'Pool 3', frame: 80, hour: 150 },
   { id: 'pool4', name: 'Pool 4', frame: 80, hour: 150 },
-  { id: 'carrom', name: 'Carrom', frame: 60, hour: 100 },
-  { id: 'tt', name: 'Table Tennis', frame: 60, hour: 100 },
-  { id: 'chess', name: 'Chess', frame: 50, hour: 50 },
-  { id: 'zapminton', name: 'Zapminton', frame: 60, hour: 100 },
+  { id: 'carrom',    name: 'Carrom',        frame: 60, hour: 100, playerRates: { 2: { frame: 60, hour: 100 }, 4: { frame: 80, hour: 150 } } },
+  { id: 'tt',        name: 'Table Tennis',  frame: 60, hour: 100, playerRates: { 2: { frame: 60, hour: 100 }, 4: { frame: 80, hour: 150 } } },
+  { id: 'chess',     name: 'Chess',         frame: 50, hour: 50 },
+  { id: 'zapminton', name: 'Zapminton',     frame: 60, hour: 100, playerRates: { 2: { frame: 60, hour: 100 }, 4: { frame: 80, hour: 150 } } },
 ]
 
 export type CartItem = { itemId: string; name: string; price: number; qty: number }
@@ -113,6 +114,14 @@ export function fmtDuration(ms: number): string {
   const s = total % 60
   const pad = (n: number) => String(n).padStart(2, '0')
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
+}
+
+// Fixed-duration billing: full hours × hourRate, remaining 30 min → frameRate.
+// e.g. 1.5 hr: 1×150 + 1×80 = ₹230  |  2 hr: 2×150 = ₹300
+export function fixedSessionAmount(durationMin: number, hourRate: number, frameRate: number): number {
+  const hours = Math.floor(durationMin / 60)
+  const hasHalf = durationMin % 60 === 30
+  return hours * hourRate + (hasHalf ? frameRate : 0)
 }
 
 // Timer bill — prorated at hourly rate, minimum = frame (30-min) price.
