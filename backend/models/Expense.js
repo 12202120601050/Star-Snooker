@@ -9,8 +9,9 @@ const expenseSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 expenseSchema.pre('save', function (next) {
-  this.date = new Date().toISOString().split('T')[0];
-  next();
+  const { getBusinessDate } = require('../utils/businessDate')
+  this.date = getBusinessDate()
+  next()
 });
 
 module.exports = mongoose.model('Expense', expenseSchema);

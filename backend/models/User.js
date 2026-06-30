@@ -34,6 +34,10 @@ const userSchema = new mongoose.Schema({
     code: String,
     expiresAt: Date
   },
+  monthlySalary: {
+    type: Number,
+    default: 0
+  },
   // Customer specific fields
   totalHoursPlayed: {
     type: Number,

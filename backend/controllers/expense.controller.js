@@ -1,4 +1,5 @@
 const Expense = require('../models/Expense');
+const { getBusinessDate } = require('../utils/businessDate');
 
 // POST /api/expenses  body: { amount, note, type: 'out'|'in' }
 exports.createExpense = async (req, res) => {
@@ -17,10 +18,10 @@ exports.createExpense = async (req, res) => {
   }
 };
 
-// GET /api/expenses?date=YYYY-MM-DD (defaults to today)
+// GET /api/expenses?date=YYYY-MM-DD (defaults to current business date)
 exports.getExpenses = async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const date = req.query.date || getBusinessDate();
     const expenses = await Expense.find({ date }).sort({ createdAt: -1 });
     res.json(expenses);
   } catch (err) {

@@ -67,7 +67,13 @@ const sessAmount = (t: TableConfig, s: ApiSession, now: number) => {
   if (s.mode === 'frames') return frameTotals(s).total
   const hr = s.hourRate || t.hour || 0
   const fr = s.frameCharge || t.frame || 0
-  if (s.selectedDuration) return fixedSessionAmount(s.selectedDuration, hr, fr)
+  if (s.selectedDuration) {
+    const elapsedMin = (now - s.startTime) / 60000
+    const GRACE = 5
+    let adj = s.selectedDuration
+    while (elapsedMin > adj + GRACE) adj += 30
+    return fixedSessionAmount(adj, hr, fr)
+  }
   return timerAmount(hr, fr, now - s.startTime)
 }
 
@@ -2121,7 +2127,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
         )}
 
         {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} isAdmin={admin} requirePin={requirePin} />}
-        {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
+        {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} userId={user?._id} userName={user?.name} isAdmin={admin} />}
         {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
         {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} expenses={expenses} onShowReport={() => setShowReport(true)} />}
         {tab === 'history' && admin && <HistoryTab />}
@@ -2338,25 +2344,108 @@ function CanteenTab({ canteen, onChange, isAdmin, requirePin }: {
   )
 }
 
-// ── Shift stock count ──
-function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }) {
+// ── Shift tab: clock-in/out + stock count ──
+function ShiftTab({ canteen, onSaved, userId, userName, isAdmin }: { canteen: Item[]; onSaved: () => void; userId?: string; userName?: string; isAdmin?: boolean }) {
   const [shift, setShift] = useState('Evening')
   const [counts, setCounts] = useState<Record<string, string>>({})
+  const [activeShift, setActiveShift] = useState<{ _id: string; clockIn: string } | null>(null)
+  const [todayShifts, setTodayShifts] = useState<{ _id: string; userName: string; clockIn: string; clockOut?: string; durationMinutes?: number }[]>([])
+  const [clockBusy, setClockBusy] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [shiftNow, setShiftNow] = useState(Date.now())
+
+  useEffect(() => {
+    api.get('/shifts/my').then(r => setActiveShift(r.data)).catch(() => {})
+    if (isAdmin) api.get('/shifts/today').then(r => setTodayShifts(r.data || [])).catch(() => {})
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (!activeShift) { setElapsed(0); return }
+    const tick = () => setShiftNow(Date.now())
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [activeShift])
+
+  const clockIn = async () => {
+    setClockBusy(true)
+    try {
+      const { data } = await api.post('/shifts/clock-in')
+      setActiveShift(data)
+    } catch (e: any) { alert(e?.response?.data?.message || 'Failed') }
+    setClockBusy(false)
+  }
+
+  const clockOut = async () => {
+    if (!confirm('Clock out now?')) return
+    setClockBusy(true)
+    try {
+      await api.post('/shifts/clock-out')
+      setActiveShift(null)
+      if (isAdmin) { const r = await api.get('/shifts/today'); setTodayShifts(r.data || []) }
+    } catch (e: any) { alert(e?.response?.data?.message || 'Failed') }
+    setClockBusy(false)
+  }
+
+  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+  const fmtElapsed = (ms: number) => { const m = Math.floor(ms / 60000); return `${Math.floor(m / 60)}h ${m % 60}m` }
+
   const save = async () => {
     const rows = canteen.map((i) => ({ itemId: i._id, name: i.name, system: i.stock, counted: Number(counts[i._id] ?? i.stock) }))
     await api.post('/stock', { shift, rows }).catch(() => {})
     onSaved()
   }
+
   return (
-    <div>
-      <div className="mb-4 flex gap-2">{['Morning', 'Evening', 'Night'].map((s) => <button key={s} onClick={() => setShift(s)} className={`rounded-lg px-3 py-1.5 text-[0.74rem] font-bold uppercase ${shift === s ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>{s}</button>)}</div>
-      <div className="overflow-hidden rounded-2xl border border-white/8">
-        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b border-white/10 bg-white/5 px-4 py-2.5 text-[0.62rem] font-bold uppercase tracking-wider text-white/50"><span>Item</span><span className="w-14 text-center">System</span><span className="w-16 text-center">Counted</span><span className="w-12 text-center">Diff</span></div>
-        {canteen.map((i) => { const c = counts[i._id]; const diff = c === undefined ? 0 : Number(c) - i.stock; return (
-          <div key={i._id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-4 py-2.5"><span className="text-[0.85rem] text-white">{i.name}</span><span className="w-14 text-center text-white/60">{i.stock}</span><input value={c ?? ''} onChange={(e) => setCounts((p) => ({ ...p, [i._id]: e.target.value }))} placeholder={`${i.stock}`} type="number" className="w-16 rounded border border-white/15 bg-ink px-2 py-1 text-center text-white" /><span className={`w-12 text-center text-[0.8rem] ${diff < 0 ? 'text-red-light' : diff > 0 ? 'text-green-400' : 'text-white/25'}`}>{c === undefined ? '—' : diff > 0 ? `+${diff}` : diff}</span></div>
-        )})}
+    <div className="space-y-6">
+      {/* Clock in/out card */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <div className="mb-3 font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">My Shift Today</div>
+        {activeShift ? (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[0.78rem] text-white/60">Clocked in at <span className="text-white">{fmtTime(activeShift.clockIn)}</span></div>
+              <div className="mt-0.5 font-display text-xl font-bold text-gold">{fmtElapsed(shiftNow - new Date(activeShift.clockIn).getTime())}</div>
+            </div>
+            <button onClick={clockOut} disabled={clockBusy} className="rounded-xl bg-red px-5 py-2.5 font-display text-[0.72rem] font-bold uppercase tracking-wider text-white disabled:opacity-40">{clockBusy ? '…' : 'Clock Out'}</button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div className="text-[0.78rem] text-white/40">Not clocked in</div>
+            <button onClick={clockIn} disabled={clockBusy} className="rounded-xl bg-gold px-5 py-2.5 font-display text-[0.72rem] font-bold uppercase tracking-wider text-ink disabled:opacity-40">{clockBusy ? '…' : 'Clock In'}</button>
+          </div>
+        )}
       </div>
-      <button onClick={save} className="mt-4 w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white">Save Shift Count</button>
+
+      {/* Admin: today's shifts */}
+      {isAdmin && todayShifts.length > 0 && (
+        <div className="rounded-2xl border border-white/8 overflow-hidden">
+          <div className="px-4 py-2.5 bg-white/5 font-display text-[0.62rem] font-bold uppercase tracking-wider text-white/50">Today's Staff Shifts</div>
+          {todayShifts.map((s) => (
+            <div key={s._id} className="flex items-center justify-between px-4 py-2.5 border-t border-white/6">
+              <div>
+                <div className="text-[0.82rem] text-white font-semibold">{s.userName}</div>
+                <div className="text-[0.62rem] text-white/40">{fmtTime(s.clockIn)}{s.clockOut ? ` → ${fmtTime(s.clockOut)}` : ' (active)'}</div>
+              </div>
+              <div className="text-[0.78rem] text-white/60">
+                {s.durationMinutes != null ? `${Math.floor(s.durationMinutes / 60)}h ${s.durationMinutes % 60}m` : <span className="text-gold">Working</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Stock count */}
+      <div>
+        <div className="mb-3 font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Stock Count</div>
+        <div className="mb-3 flex gap-2">{['Morning', 'Evening', 'Night'].map((s) => <button key={s} onClick={() => setShift(s)} className={`rounded-lg px-3 py-1.5 text-[0.74rem] font-bold uppercase ${shift === s ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>{s}</button>)}</div>
+        <div className="overflow-hidden rounded-2xl border border-white/8">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b border-white/10 bg-white/5 px-4 py-2.5 text-[0.62rem] font-bold uppercase tracking-wider text-white/50"><span>Item</span><span className="w-14 text-center">System</span><span className="w-16 text-center">Counted</span><span className="w-12 text-center">Diff</span></div>
+          {canteen.map((i) => { const c = counts[i._id]; const diff = c === undefined ? 0 : Number(c) - i.stock; return (
+            <div key={i._id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-4 py-2.5"><span className="text-[0.85rem] text-white">{i.name}</span><span className="w-14 text-center text-white/60">{i.stock}</span><input value={c ?? ''} onChange={(e) => setCounts((p) => ({ ...p, [i._id]: e.target.value }))} placeholder={`${i.stock}`} type="number" className="w-16 rounded border border-white/15 bg-ink px-2 py-1 text-center text-white" /><span className={`w-12 text-center text-[0.8rem] ${diff < 0 ? 'text-red-light' : diff > 0 ? 'text-green-400' : 'text-white/25'}`}>{c === undefined ? '—' : diff > 0 ? `+${diff}` : diff}</span></div>
+          )})}
+        </div>
+        <button onClick={save} className="mt-4 w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white">Save Shift Count</button>
+      </div>
     </div>
   )
 }
@@ -2366,7 +2455,7 @@ function HistoryTab() {
   type DelCust = { _id: string; name: string; phone?: string; updatedAt?: string }
   type DelItem = { _id: string; name: string; price: number; stock: number; updatedAt?: string }
   type DelBill = { _id: string; tableName: string; total: number; paymentMethod: string; customerName?: string; createdAt: string }
-  type StaffUser = { _id: string; name: string; phone: string; isActive: boolean }
+  type StaffUser = { _id: string; name: string; phone: string; isActive: boolean; monthlySalary?: number }
 
   const [section, setSection] = useState<'customers' | 'canteen' | 'bills' | 'staff'>('customers')
   const [customers, setCustomers] = useState<DelCust[]>([])
@@ -2374,6 +2463,8 @@ function HistoryTab() {
   const [bills, setBills] = useState<DelBill[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  const [editSalaryFor, setEditSalaryFor] = useState<string | null>(null)
+  const [salaryInput, setSalaryInput] = useState('')
 
   // Staff creation form
   const [stName, setStName] = useState(''); const [stPhone, setStPhone] = useState(''); const [stPin, setStPin] = useState(''); const [stBusy, setStBusy] = useState(false); const [stMsg, setStMsg] = useState('')
@@ -2485,18 +2576,32 @@ function HistoryTab() {
           <div className="space-y-2">
             {staff.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No staff accounts</div>}
             {staff.map((s) => (
-              <div key={s._id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-white/80">{s.name}</span>
-                    {!s.isActive && <span className="rounded-full bg-red-light/20 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase text-red-light">Inactive</span>}
+              <div key={s._id} className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-white/80">{s.name}</span>
+                      {!s.isActive && <span className="rounded-full bg-red-light/20 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase text-red-light">Inactive</span>}
+                    </div>
+                    <div className="text-[0.62rem] text-white/35">{s.phone}</div>
                   </div>
-                  <div className="text-[0.62rem] text-white/35">{s.phone}</div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setEditSalaryFor(s._id); setSalaryInput(String(s.monthlySalary || 0)) }} className="rounded-lg border border-gold/30 bg-gold/[0.07] px-2.5 py-1 text-[0.62rem] font-bold text-gold">
+                      {s.monthlySalary ? `₹${s.monthlySalary.toLocaleString('en-IN')}/mo` : 'Set Salary'}
+                    </button>
+                    {s.isActive && (
+                      <button onClick={() => { if (confirm(`Deactivate ${s.name}?`)) act(() => api.delete(`/auth/staff/${s._id}`), s._id) }} disabled={busy === s._id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-2.5 py-1 text-[0.62rem] font-bold text-red-light disabled:opacity-40">
+                        {busy === s._id ? '…' : 'Deactivate'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {s.isActive && (
-                  <button onClick={() => { if (confirm(`Deactivate ${s.name}?`)) act(() => api.delete(`/auth/staff/${s._id}`), s._id) }} disabled={busy === s._id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-3 py-1.5 text-[0.68rem] font-bold text-red-light disabled:opacity-40">
-                    {busy === s._id ? '…' : 'Deactivate'}
-                  </button>
+                {editSalaryFor === s._id && (
+                  <div className="mt-3 flex items-center gap-2 border-t border-white/8 pt-3">
+                    <input value={salaryInput} onChange={(e) => setSalaryInput(e.target.value)} placeholder="Monthly salary ₹" type="number" className="flex-1 rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-gold" />
+                    <button onClick={async () => { await api.put(`/auth/staff/${s._id}/salary`, { monthlySalary: Number(salaryInput) }); setEditSalaryFor(null); load() }} className="rounded-lg bg-gold px-3 py-1.5 text-[0.68rem] font-bold text-ink">Save</button>
+                    <button onClick={() => setEditSalaryFor(null)} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.68rem] text-white/50">Cancel</button>
+                  </div>
                 )}
               </div>
             ))}

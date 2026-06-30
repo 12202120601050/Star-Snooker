@@ -2,6 +2,7 @@ const Bill = require('../models/Bill');
 const Customer = require('../models/Customer');
 const CanteenItem = require('../models/CanteenItem');
 const KhataTransaction = require('../models/KhataTransaction');
+const { businessDayStart, getBusinessDate } = require('../utils/businessDate');
 
 // POST /api/bills — create a bill (checkout). Decrements canteen stock for any
 // items sold, updates customer loyalty/credit when a customer is attached.
@@ -98,11 +99,11 @@ exports.deleteBill = async (req, res) => {
   }
 };
 
-// GET /api/bills/today
+// GET /api/bills/today — bills since 8AM (business day)
 exports.getTodayBills = async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    res.json(await Bill.find({ date: today, isDeleted: { $ne: true } }).sort({ createdAt: -1 }));
+    const start = businessDayStart()
+    res.json(await Bill.find({ createdAt: { $gte: start }, isDeleted: { $ne: true } }).sort({ createdAt: -1 }));
   } catch {
     res.status(500).json({ message: 'Failed to fetch today bills' });
   }
@@ -111,8 +112,8 @@ exports.getTodayBills = async (req, res) => {
 // GET /api/bills/deleted — today's soft-deleted bills (admin only)
 exports.getDeletedBills = async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const bills = await Bill.find({ date: today, isDeleted: true }).sort({ createdAt: -1 }).limit(50);
+    const start = businessDayStart()
+    const bills = await Bill.find({ createdAt: { $gte: start }, isDeleted: true }).sort({ createdAt: -1 }).limit(50);
     res.json(bills);
   } catch {
     res.status(500).json({ message: 'Failed to fetch deleted bills' });

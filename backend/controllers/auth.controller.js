@@ -238,4 +238,16 @@ const deactivateStaff = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin, createStaff, getStaff, deactivateStaff };
+// PUT /api/auth/staff/:id/salary — set monthly salary (admin only)
+const setSalary = async (req, res) => {
+  try {
+    const { monthlySalary } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { monthlySalary: Number(monthlySalary) || 0 }, { new: true }).select('-password -otp');
+    if (!user) return res.status(404).json({ message: 'Staff not found' });
+    res.json({ monthlySalary: user.monthlySalary });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update salary' });
+  }
+};
+
+module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin, createStaff, getStaff, deactivateStaff, setSalary };
