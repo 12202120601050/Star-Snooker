@@ -16,7 +16,8 @@ const stockCountSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 stockCountSchema.pre('save', function (next) {
-  this.date = new Date().toISOString().split('T')[0];
+  const { getBusinessDate } = require('../utils/businessDate');
+  this.date = getBusinessDate();
   next();
 });
 

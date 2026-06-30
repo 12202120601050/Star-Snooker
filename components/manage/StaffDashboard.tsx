@@ -2127,7 +2127,7 @@ export function StaffDashboard({ admin = false }: { admin?: boolean }) {
         )}
 
         {tab === 'canteen' && <CanteenTab canteen={canteen} onChange={refreshCanteen} isAdmin={admin} requirePin={requirePin} />}
-        {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} userId={user?._id} userName={user?.name} isAdmin={admin} />}
+        {tab === 'shift' && <ShiftTab canteen={canteen} onSaved={refreshCanteen} />}
         {tab === 'khata' && <KhataTab onBillCreated={refreshBills} />}
         {tab === 'finance' && admin && <FinanceTab khata={khata} todayBills={bills} canteen={canteen} expenses={expenses} onShowReport={() => setShowReport(true)} />}
         {tab === 'history' && admin && <HistoryTab />}
@@ -2344,99 +2344,30 @@ function CanteenTab({ canteen, onChange, isAdmin, requirePin }: {
   )
 }
 
-// ── Shift tab: clock-in/out + stock count ──
-function ShiftTab({ canteen, onSaved, userId, userName, isAdmin }: { canteen: Item[]; onSaved: () => void; userId?: string; userName?: string; isAdmin?: boolean }) {
+// ── Shift tab: stock count + count history ──
+function ShiftTab({ canteen, onSaved }: { canteen: Item[]; onSaved: () => void }) {
   const [shift, setShift] = useState('Evening')
   const [counts, setCounts] = useState<Record<string, string>>({})
-  const [activeShift, setActiveShift] = useState<{ _id: string; clockIn: string } | null>(null)
-  const [todayShifts, setTodayShifts] = useState<{ _id: string; userName: string; clockIn: string; clockOut?: string; durationMinutes?: number }[]>([])
-  const [clockBusy, setClockBusy] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
-  const [shiftNow, setShiftNow] = useState(Date.now())
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState<{ _id: string; shift: string; date: string; createdAt: string; rows: { name: string; system: number; counted: number }[] }[]>([])
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get('/shifts/my').then(r => setActiveShift(r.data)).catch(() => {})
-    if (isAdmin) api.get('/shifts/today').then(r => setTodayShifts(r.data || [])).catch(() => {})
-  }, [isAdmin])
-
-  useEffect(() => {
-    if (!activeShift) { setElapsed(0); return }
-    const tick = () => setShiftNow(Date.now())
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [activeShift])
-
-  const clockIn = async () => {
-    setClockBusy(true)
-    try {
-      const { data } = await api.post('/shifts/clock-in')
-      setActiveShift(data)
-    } catch (e: any) { alert(e?.response?.data?.message || 'Failed') }
-    setClockBusy(false)
-  }
-
-  const clockOut = async () => {
-    if (!confirm('Clock out now?')) return
-    setClockBusy(true)
-    try {
-      await api.post('/shifts/clock-out')
-      setActiveShift(null)
-      if (isAdmin) { const r = await api.get('/shifts/today'); setTodayShifts(r.data || []) }
-    } catch (e: any) { alert(e?.response?.data?.message || 'Failed') }
-    setClockBusy(false)
-  }
-
-  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-  const fmtElapsed = (ms: number) => { const m = Math.floor(ms / 60000); return `${Math.floor(m / 60)}h ${m % 60}m` }
+    if (showHistory) api.get('/stock').then(r => setHistory(r.data || [])).catch(() => {})
+  }, [showHistory])
 
   const save = async () => {
     const rows = canteen.map((i) => ({ itemId: i._id, name: i.name, system: i.stock, counted: Number(counts[i._id] ?? i.stock) }))
     await api.post('/stock', { shift, rows }).catch(() => {})
     onSaved()
+    setCounts({})
+    if (showHistory) api.get('/stock').then(r => setHistory(r.data || [])).catch(() => {})
   }
 
   return (
-    <div className="space-y-6">
-      {/* Clock in/out card */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <div className="mb-3 font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">My Shift Today</div>
-        {activeShift ? (
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-[0.78rem] text-white/60">Clocked in at <span className="text-white">{fmtTime(activeShift.clockIn)}</span></div>
-              <div className="mt-0.5 font-display text-xl font-bold text-gold">{fmtElapsed(shiftNow - new Date(activeShift.clockIn).getTime())}</div>
-            </div>
-            <button onClick={clockOut} disabled={clockBusy} className="rounded-xl bg-red px-5 py-2.5 font-display text-[0.72rem] font-bold uppercase tracking-wider text-white disabled:opacity-40">{clockBusy ? '…' : 'Clock Out'}</button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div className="text-[0.78rem] text-white/40">Not clocked in</div>
-            <button onClick={clockIn} disabled={clockBusy} className="rounded-xl bg-gold px-5 py-2.5 font-display text-[0.72rem] font-bold uppercase tracking-wider text-ink disabled:opacity-40">{clockBusy ? '…' : 'Clock In'}</button>
-          </div>
-        )}
-      </div>
-
-      {/* Admin: today's shifts */}
-      {isAdmin && todayShifts.length > 0 && (
-        <div className="rounded-2xl border border-white/8 overflow-hidden">
-          <div className="px-4 py-2.5 bg-white/5 font-display text-[0.62rem] font-bold uppercase tracking-wider text-white/50">Today's Staff Shifts</div>
-          {todayShifts.map((s) => (
-            <div key={s._id} className="flex items-center justify-between px-4 py-2.5 border-t border-white/6">
-              <div>
-                <div className="text-[0.82rem] text-white font-semibold">{s.userName}</div>
-                <div className="text-[0.62rem] text-white/40">{fmtTime(s.clockIn)}{s.clockOut ? ` → ${fmtTime(s.clockOut)}` : ' (active)'}</div>
-              </div>
-              <div className="text-[0.78rem] text-white/60">
-                {s.durationMinutes != null ? `${Math.floor(s.durationMinutes / 60)}h ${s.durationMinutes % 60}m` : <span className="text-gold">Working</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Stock count */}
+    <div className="space-y-5">
+      {/* Stock count form */}
       <div>
-        <div className="mb-3 font-display text-[0.68rem] font-bold uppercase tracking-wider text-white/40">Stock Count</div>
         <div className="mb-3 flex gap-2">{['Morning', 'Evening', 'Night'].map((s) => <button key={s} onClick={() => setShift(s)} className={`rounded-lg px-3 py-1.5 text-[0.74rem] font-bold uppercase ${shift === s ? 'bg-gold text-ink' : 'border border-white/12 text-white/55'}`}>{s}</button>)}</div>
         <div className="overflow-hidden rounded-2xl border border-white/8">
           <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b border-white/10 bg-white/5 px-4 py-2.5 text-[0.62rem] font-bold uppercase tracking-wider text-white/50"><span>Item</span><span className="w-14 text-center">System</span><span className="w-16 text-center">Counted</span><span className="w-12 text-center">Diff</span></div>
@@ -2446,6 +2377,52 @@ function ShiftTab({ canteen, onSaved, userId, userName, isAdmin }: { canteen: It
         </div>
         <button onClick={save} className="mt-4 w-full rounded-lg bg-red py-3 font-display text-sm font-bold uppercase tracking-wider text-white">Save Shift Count</button>
       </div>
+
+      {/* Count history toggle */}
+      <button onClick={() => setShowHistory(v => !v)} className="flex w-full items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-left">
+        <span className="font-display text-[0.72rem] font-bold uppercase tracking-wider text-white/50">Count History</span>
+        <span className="text-[0.72rem] text-white/30">{showHistory ? '▲' : '▼'}</span>
+      </button>
+
+      {showHistory && (
+        <div className="space-y-2">
+          {history.length === 0 && <div className="rounded-xl border border-white/8 p-5 text-center text-[0.75rem] text-white/30">No count records yet</div>}
+          {history.map((h) => {
+            const diffs = h.rows.filter(r => r.counted !== r.system)
+            const isOpen = expandedId === h._id
+            return (
+              <div key={h._id} className="overflow-hidden rounded-xl border border-white/10">
+                <button onClick={() => setExpandedId(isOpen ? null : h._id)} className="flex w-full items-center justify-between px-4 py-3 text-left">
+                  <div>
+                    <span className="text-[0.82rem] font-semibold text-white">{h.shift} — {h.date}</span>
+                    <span className="ml-3 text-[0.62rem] text-white/35">{new Date(h.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {diffs.length > 0 && <span className="rounded-full bg-red-light/20 px-2 py-0.5 text-[0.58rem] font-bold text-red-light">{diffs.length} diff</span>}
+                    <span className="text-[0.7rem] text-white/30">{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t border-white/8 bg-white/[0.02]">
+                    {h.rows.map((r, i) => {
+                      const d = r.counted - r.system
+                      return (
+                        <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-white/5 last:border-0">
+                          <span className="text-[0.8rem] text-white/70">{r.name}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[0.72rem] text-white/40">{r.system} → {r.counted}</span>
+                            <span className={`w-10 text-right text-[0.72rem] font-bold ${d < 0 ? 'text-red-light' : d > 0 ? 'text-green-400' : 'text-white/20'}`}>{d === 0 ? '—' : d > 0 ? `+${d}` : d}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -2465,6 +2442,13 @@ function HistoryTab() {
   const [busy, setBusy] = useState<string | null>(null)
   const [editSalaryFor, setEditSalaryFor] = useState<string | null>(null)
   const [salaryInput, setSalaryInput] = useState('')
+  const [payFor, setPayFor] = useState<string | null>(null)
+  const [payAmount, setPayAmount] = useState('')
+  const [payMonth, setPayMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [payNote, setPayNote] = useState('')
+  const [payBusy, setPayBusy] = useState(false)
+  const [payHistory, setPayHistory] = useState<Record<string, { _id: string; amount: number; month: string; note: string; createdAt: string }[]>>({})
+  const [showPayHistFor, setShowPayHistFor] = useState<string | null>(null)
 
   // Staff creation form
   const [stName, setStName] = useState(''); const [stPhone, setStPhone] = useState(''); const [stPin, setStPin] = useState(''); const [stBusy, setStBusy] = useState(false); const [stMsg, setStMsg] = useState('')
@@ -2489,6 +2473,23 @@ function HistoryTab() {
     } catch (e: any) { setStMsg(e?.response?.data?.message || 'Failed') }
     setStBusy(false)
   }
+
+  const loadPayHistory = async (id: string) => {
+    try { const { data } = await api.get(`/auth/staff/${id}/payments`); setPayHistory(p => ({ ...p, [id]: data || [] })) } catch {}
+  }
+
+  const recordPay = async (s: { _id: string; name: string; monthlySalary?: number }) => {
+    if (!payAmount) return
+    setPayBusy(true)
+    try {
+      await api.post(`/auth/staff/${s._id}/pay`, { amount: Number(payAmount), month: payMonth, note: payNote })
+      setPayFor(null); setPayAmount(''); setPayNote('')
+      loadPayHistory(s._id)
+    } catch (e: any) { alert(e?.response?.data?.message || 'Failed') }
+    setPayBusy(false)
+  }
+
+  const fmtMonth = (m: string) => { const [y, mo] = m.split('-'); return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mo)-1]} ${y}` }
 
   const sections: Array<{ id: typeof section; label: string }> = [
     { id: 'customers', label: 'Customers' }, { id: 'canteen', label: 'Canteen Items' },
@@ -2577,6 +2578,7 @@ function HistoryTab() {
             {staff.length === 0 && <div className="rounded-xl border border-white/8 p-6 text-center text-[0.78rem] text-white/30">No staff accounts</div>}
             {staff.map((s) => (
               <div key={s._id} className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                {/* Header row */}
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
@@ -2585,22 +2587,63 @@ function HistoryTab() {
                     </div>
                     <div className="text-[0.62rem] text-white/35">{s.phone}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => { setEditSalaryFor(s._id); setSalaryInput(String(s.monthlySalary || 0)) }} className="rounded-lg border border-gold/30 bg-gold/[0.07] px-2.5 py-1 text-[0.62rem] font-bold text-gold">
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => { setEditSalaryFor(editSalaryFor === s._id ? null : s._id); setSalaryInput(String(s.monthlySalary || 0)); setPayFor(null) }} className="rounded-lg border border-gold/30 bg-gold/[0.07] px-2 py-1 text-[0.58rem] font-bold text-gold">
                       {s.monthlySalary ? `₹${s.monthlySalary.toLocaleString('en-IN')}/mo` : 'Set Salary'}
                     </button>
                     {s.isActive && (
-                      <button onClick={() => { if (confirm(`Deactivate ${s.name}?`)) act(() => api.delete(`/auth/staff/${s._id}`), s._id) }} disabled={busy === s._id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-2.5 py-1 text-[0.62rem] font-bold text-red-light disabled:opacity-40">
-                        {busy === s._id ? '…' : 'Deactivate'}
+                      <button onClick={() => { setPayFor(payFor === s._id ? null : s._id); setPayAmount(String(s.monthlySalary || '')); setEditSalaryFor(null); if (payFor !== s._id) loadPayHistory(s._id) }} className="rounded-lg border border-green-400/30 bg-green-400/[0.07] px-2 py-1 text-[0.58rem] font-bold text-green-400">Pay</button>
+                    )}
+                    {s.isActive && (
+                      <button onClick={() => { if (confirm(`Deactivate ${s.name}?`)) act(() => api.delete(`/auth/staff/${s._id}`), s._id) }} disabled={busy === s._id} className="rounded-lg border border-red-light/30 bg-red-light/[0.07] px-2 py-1 text-[0.58rem] font-bold text-red-light disabled:opacity-40">
+                        {busy === s._id ? '…' : 'Off'}
                       </button>
                     )}
                   </div>
                 </div>
+
+                {/* Edit salary inline */}
                 {editSalaryFor === s._id && (
                   <div className="mt-3 flex items-center gap-2 border-t border-white/8 pt-3">
                     <input value={salaryInput} onChange={(e) => setSalaryInput(e.target.value)} placeholder="Monthly salary ₹" type="number" className="flex-1 rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-gold" />
                     <button onClick={async () => { await api.put(`/auth/staff/${s._id}/salary`, { monthlySalary: Number(salaryInput) }); setEditSalaryFor(null); load() }} className="rounded-lg bg-gold px-3 py-1.5 text-[0.68rem] font-bold text-ink">Save</button>
-                    <button onClick={() => setEditSalaryFor(null)} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.68rem] text-white/50">Cancel</button>
+                    <button onClick={() => setEditSalaryFor(null)} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.68rem] text-white/50">✕</button>
+                  </div>
+                )}
+
+                {/* Pay salary inline */}
+                {payFor === s._id && (
+                  <div className="mt-3 border-t border-white/8 pt-3 space-y-2">
+                    <div className="font-display text-[0.6rem] font-bold uppercase tracking-wider text-green-400/70">Record Salary Payment</div>
+                    <div className="flex gap-2">
+                      <input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="Amount ₹" type="number" className="flex-1 rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-green-400" />
+                      <input value={payMonth} onChange={(e) => setPayMonth(e.target.value)} type="month" className="rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-green-400" />
+                    </div>
+                    <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Note (optional)" className="w-full rounded-lg border border-white/15 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-green-400" />
+                    <div className="flex gap-2">
+                      <button onClick={() => recordPay(s)} disabled={payBusy || !payAmount} className="rounded-lg bg-green-500 px-4 py-1.5 text-[0.68rem] font-bold text-white disabled:opacity-40">{payBusy ? '…' : '✓ Record Payment'}</button>
+                      <button onClick={() => setPayFor(null)} className="rounded-lg border border-white/15 px-3 py-1.5 text-[0.68rem] text-white/50">Cancel</button>
+                    </div>
+
+                    {/* Payment history */}
+                    {payHistory[s._id] && (
+                      <div className="mt-1">
+                        <div className="mb-1 text-[0.58rem] font-bold uppercase tracking-wider text-white/30">Payment History</div>
+                        {payHistory[s._id].length === 0 && <div className="text-[0.68rem] text-white/25">No payments recorded yet</div>}
+                        {payHistory[s._id].map((p) => (
+                          <div key={p._id} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
+                            <div>
+                              <span className="text-[0.78rem] text-white font-semibold">{fmtMonth(p.month)}</span>
+                              {p.note && <span className="ml-2 text-[0.62rem] text-white/35">{p.note}</span>}
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[0.78rem] font-bold text-green-400">₹{p.amount.toLocaleString('en-IN')}</div>
+                              <div className="text-[0.58rem] text-white/30">{new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

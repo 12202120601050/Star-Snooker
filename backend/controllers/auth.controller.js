@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const SalaryPayment = require('../models/SalaryPayment');
 const generateToken = require('../utils/generateToken');
 const axios = require('axios');
 
@@ -250,4 +251,35 @@ const setSalary = async (req, res) => {
   }
 };
 
-module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin, createStaff, getStaff, deactivateStaff, setSalary };
+// POST /api/auth/staff/:id/pay — record a salary payment (admin only)
+const paySalary = async (req, res) => {
+  try {
+    const { amount, month, note } = req.body;
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ message: 'Amount required' });
+    const staff = await User.findById(req.params.id);
+    if (!staff) return res.status(404).json({ message: 'Staff not found' });
+    const payment = await SalaryPayment.create({
+      userId: staff._id,
+      userName: staff.name,
+      amount: Number(amount),
+      month: month || new Date().toISOString().slice(0, 7),
+      note: note || '',
+      paidBy: req.user._id,
+    });
+    res.status(201).json(payment);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to record payment' });
+  }
+};
+
+// GET /api/auth/staff/:id/payments — salary payment history (admin only)
+const getSalaryPayments = async (req, res) => {
+  try {
+    const payments = await SalaryPayment.find({ userId: req.params.id }).sort({ createdAt: -1 }).limit(24);
+    res.json(payments);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch payments' });
+  }
+};
+
+module.exports = { sendOtp, register, login, forgotPassword, resetPassword, getMe, verifyPin, changePin, createStaff, getStaff, deactivateStaff, setSalary, paySalary, getSalaryPayments };
